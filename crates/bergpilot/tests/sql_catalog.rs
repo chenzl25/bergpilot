@@ -91,6 +91,73 @@ async fn browses_and_queries_a_sql_catalog() {
     assert_eq!(status, StatusCode::OK, "{result}");
     assert_eq!(result["rows"], json!([["eu", "60.0"], ["us", "150.0"]]));
 
+    // Metadata tables.
+    let query = |sql: &str| {
+        let router = router.clone();
+        let sql = sql.to_owned();
+        async move {
+            let (status, result) =
+                call(&router, "POST", "/api/query", Some(json!({ "sql": sql }))).await;
+            assert_eq!(status, StatusCode::OK, "{result}");
+            result["rows"].clone()
+        }
+    };
+    assert_eq!(
+        query(r#"SELECT count(*), min(operation) FROM local.sales."orders$snapshots""#).await,
+        json!([["2", "append"]])
+    );
+    assert_eq!(
+        query(
+            r#"SELECT count(*), bool_and(is_current_ancestor) FROM local.sales."orders$history""#
+        )
+        .await,
+        json!([["2", "true"]])
+    );
+    assert_eq!(
+        query(r#"SELECT name, type FROM local.sales."orders$refs""#).await,
+        json!([["main", "branch"]])
+    );
+    assert_eq!(
+        query(
+            r#"SELECT partition, sum(record_count), count(*) FROM local.sales."orders$files"
+               WHERE content = 'data' GROUP BY partition ORDER BY partition"#
+        )
+        .await,
+        json!([["region=eu", "3", "2"], ["region=us", "3", "2"]])
+    );
+    assert_eq!(
+        query(r#"SELECT partition, record_count, data_files FROM local.sales."orders$partitions""#)
+            .await,
+        json!([["region=eu", "3", "2"], ["region=us", "3", "2"]])
+    );
+    assert_eq!(
+        query(r#"SELECT count(*), sum(added_files_count) FROM local.sales."orders$manifests""#)
+            .await,
+        json!([["2", "4"]])
+    );
+    let (status, error) = call(
+        &router,
+        "POST",
+        "/api/query",
+        Some(json!({ "sql": r#"SELECT * FROM local.sales."orders$nope""# })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        error["error"].as_str().unwrap().contains("$partitions"),
+        "{error}"
+    );
+
+    let (_, partitions) = call(
+        &router,
+        "GET",
+        &format!("/api/catalogs/{id}/table/partitions?namespace=sales&name=orders"),
+        None,
+    )
+    .await;
+    assert_eq!(partitions[1]["partition"], "region=us");
+    assert_eq!(partitions[1]["data_files"], 2);
+
     // The wrong stored name finds nothing: the setting matters.
     let (status, test) = call(
         &router,

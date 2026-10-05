@@ -3,6 +3,8 @@
 //! Tables are named `catalog.namespace.table`. A nested namespace is one
 //! quoted, dot-separated identifier: `dev."a.b".events`. Only the tables a
 //! query mentions are loaded, each pinned to its current snapshot.
+//! Metadata tables are `"table$kind"`, e.g. `dev.demo."events$files"` (see
+//! `metadata_tables`).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -187,9 +189,17 @@ async fn register_tables(
             .await?
             .ok_or_else(|| ApiError::BadRequest(format!("there is no catalog named {catalog}")))?;
         let namespace = NamespaceIdent::from_strs(schema.split('.'))?;
-        let ident = TableIdent::new(namespace, table.to_string());
+        // `events$files` reads the metadata table `files` of `events`.
+        let (base, metadata_kind) = match table.split_once('$') {
+            Some((base, kind)) => (base, Some(kind)),
+            None => (table.as_ref(), None),
+        };
+        let ident = TableIdent::new(namespace, base.to_owned());
         let loaded = connected.catalog.load_table(&ident).await?;
-        let provider = IcebergStaticTableProvider::try_new_from_table(loaded).await?;
+        let provider: Arc<dyn datafusion::catalog::TableProvider> = match metadata_kind {
+            Some(kind) => Arc::new(crate::metadata_tables::build(&loaded, kind).await?),
+            None => Arc::new(IcebergStaticTableProvider::try_new_from_table(loaded).await?),
+        };
 
         let catalog_provider = catalogs
             .entry(catalog.to_string())
@@ -211,7 +221,7 @@ async fn register_tables(
         };
         if !schema_provider.table_exist(table) {
             schema_provider
-                .register_table(table.to_string(), Arc::new(provider))
+                .register_table(table.to_string(), provider)
                 .map_err(|error| ApiError::Internal(error.to_string()))?;
         }
     }

@@ -25,6 +25,7 @@ pub fn router() -> Router<AppState> {
         .route("/catalogs/{id}/tables", get(browse::tables))
         .route("/catalogs/{id}/table", get(browse::table))
         .route("/catalogs/{id}/table/files", get(browse::files))
+        .route("/catalogs/{id}/table/partitions", get(browse::partitions))
         .route("/query", post(query::run))
         .route("/jobs", get(jobs::list).post(jobs::submit))
         .route("/jobs/{id}", get(jobs::get_one))

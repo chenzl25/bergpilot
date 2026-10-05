@@ -12,6 +12,7 @@ import type { ScheduleInfo } from "./generated/ScheduleInfo";
 import type { ScheduleInput } from "./generated/ScheduleInput";
 import type { TableRef } from "./generated/TableRef";
 import type { NamespaceList } from "./generated/NamespaceList";
+import type { PartitionStat } from "./generated/PartitionStat";
 import type { QueryResult } from "./generated/QueryResult";
 import type { ServerInfo } from "./generated/ServerInfo";
 import type { TableDetail } from "./generated/TableDetail";
@@ -122,6 +123,10 @@ export const api = {
         (snapshotId ? `&snapshot_id=${snapshotId}` : ""),
     ),
 
+  partitions: (id: number, namespace: string[], name: string) =>
+    request<PartitionStat[]>(
+      `/catalogs/${id}/table/partitions?namespace=${encodeNamespace(namespace)}&name=${encodeURIComponent(name)}`,
+    ),
   jobs: (target?: TableRef, limit = 100) =>
     request<JobInfo[]>(`/jobs?limit=${limit}${target ? `&${tableQuery(target)}` : ""}`),
   job: (id: number) => request<JobInfo>(`/jobs/${id}`),

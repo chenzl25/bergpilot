@@ -10,6 +10,7 @@ pub mod files;
 pub mod jobs;
 pub mod maintenance;
 pub mod metadata;
+pub mod metadata_tables;
 pub mod orphans;
 pub mod query;
 pub mod secrets;

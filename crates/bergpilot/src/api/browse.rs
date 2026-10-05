@@ -100,6 +100,17 @@ pub async fn files(
     Ok(Json(state.file_stats.stats(&table, snapshot_id).await?))
 }
 
+pub async fn partitions(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Query(query): Query<TableQuery>,
+) -> ApiResult<Json<Vec<crate::metadata_tables::PartitionStat>>> {
+    let connected = state.registry.get(id).await?;
+    let ident = TableIdent::new(namespace_ident(&query.namespace)?, query.name);
+    let table = connected.catalog.load_table(&ident).await?;
+    Ok(Json(crate::metadata_tables::partition_stats(&table).await?))
+}
+
 fn namespace_ident(value: &str) -> ApiResult<NamespaceIdent> {
     let levels = split_namespace(value);
     if levels.is_empty() {

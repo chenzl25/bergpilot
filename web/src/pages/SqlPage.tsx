@@ -10,7 +10,10 @@ import { errorMessage } from "../components/Layout";
 import { formatNumber } from "../format";
 
 const STORAGE_KEY = "bergpilot.sql";
-const DEFAULT_SQL = "-- Tables are named catalog.namespace.table\nSELECT 1 AS ok";
+const DEFAULT_SQL = `-- Tables are named catalog.namespace.table.
+-- Metadata tables: catalog.namespace."table$snapshots", $history, $refs,
+-- $manifests, $files and $partitions.
+SELECT 1 AS ok`;
 
 export function SqlPage() {
   const [search, setSearch] = useSearchParams();

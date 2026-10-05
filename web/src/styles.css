@@ -970,3 +970,33 @@ details.paths ul {
   margin-left: 8px;
   font-size: 12px;
 }
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 24px 0 10px;
+}
+
+.section-header h2 {
+  margin: 0;
+}
+
+.small-segmented button {
+  height: 28px;
+  font-size: 12px;
+}
+
+.share-cell {
+  min-width: 160px;
+  position: relative;
+}
+
+.share-bar {
+  display: inline-block;
+  height: 10px;
+  background: var(--data);
+  border-radius: 2px;
+  margin-right: 6px;
+  vertical-align: middle;
+}

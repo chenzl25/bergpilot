@@ -272,6 +272,76 @@ function FilesTab(props: { detail: TableDetail; catalogId: number; namespace: st
       {files.isPending && <p className="muted">Reading manifests…</p>}
       {files.isError && <p className="error">{errorMessage(files.error)}</p>}
       {files.data && <FileStatsView stats={files.data} />}
+      {detail.partition_fields.length > 0 && snapshotId === undefined && (
+        <Partitions catalogId={catalogId} namespace={namespace} name={detail.name} />
+      )}
+    </div>
+  );
+}
+
+const PARTITION_ROWS = 200;
+
+function Partitions(props: { catalogId: number; namespace: string[]; name: string }) {
+  const partitions = useQuery({
+    queryKey: ["partitions", props.catalogId, props.namespace, props.name],
+    queryFn: () => api.partitions(props.catalogId, props.namespace, props.name),
+  });
+  const [sort, setSort] = useState<"size" | "name">("size");
+  if (partitions.isPending) return <p className="muted">Reading partitions…</p>;
+  if (partitions.isError) return <p className="error">{errorMessage(partitions.error)}</p>;
+  const rows = [...partitions.data].sort((a, b) =>
+    sort === "size" ? b.data_bytes - a.data_bytes : a.partition.localeCompare(b.partition),
+  );
+  const largest = Math.max(1, ...rows.map((row) => row.data_bytes));
+  const total = rows.reduce((sum, row) => sum + row.data_bytes, 0);
+  return (
+    <div>
+      <div className="section-header">
+        <h2>Partitions ({formatNumber(rows.length)})</h2>
+        <div className="segmented small-segmented">
+          <button className={sort === "size" ? "active" : ""} onClick={() => setSort("size")}>
+            Largest first
+          </button>
+          <button className={sort === "name" ? "active" : ""} onClick={() => setSort("name")}>
+            By name
+          </button>
+        </div>
+      </div>
+      <table className="grid compact">
+        <thead>
+          <tr>
+            <th>Partition</th>
+            <th className="right">Records</th>
+            <th className="right">Data files</th>
+            <th className="right">Data size</th>
+            <th>Share of data</th>
+            <th className="right">Avg file</th>
+            <th className="right">Delete files</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.slice(0, PARTITION_ROWS).map((row) => (
+            <tr key={row.partition}>
+              <td className="mono">{row.partition || "(unpartitioned)"}</td>
+              <td className="right">{formatNumber(row.record_count)}</td>
+              <td className="right">{formatNumber(row.data_files)}</td>
+              <td className="right">{formatBytes(row.data_bytes)}</td>
+              <td className="share-cell">
+                <div className="share-bar" style={{ width: `${Math.max(1, (row.data_bytes / largest) * 110)}px` }} />
+                <span className="muted small">{total ? `${((row.data_bytes / total) * 100).toFixed(1)}%` : ""}</span>
+              </td>
+              <td className="right">{row.data_files ? formatBytes(row.data_bytes / row.data_files) : "—"}</td>
+              <td className="right">{row.delete_files ? formatNumber(row.delete_files) : ""}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {rows.length > PARTITION_ROWS && (
+        <p className="muted small">
+          Showing {PARTITION_ROWS} of {formatNumber(rows.length)}. Query{" "}
+          <code>"{props.name}$partitions"</code> in SQL for all of them.
+        </p>
+      )}
     </div>
   );
 }
