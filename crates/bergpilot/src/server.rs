@@ -64,11 +64,51 @@ impl AppState {
 pub fn app(state: AppState) -> Router {
     let api = crate::api::router()
         .route_layer(middleware::from_fn_with_state(state.clone(), require_token))
-        .with_state(state);
+        .with_state(state.clone());
     Router::new()
         .nest("/api", api)
         .fallback(crate::web::serve_asset)
+        .layer(middleware::from_fn_with_state(state, check_host))
         .layer(TraceLayer::new_for_http())
+}
+
+/// Without a token BergPilot trusts anything that can reach it, which is
+/// only this machine. A web page could still reach it through DNS rebinding
+/// (a hostname that resolves to 127.0.0.1), so in that mode only loopback
+/// host names are accepted. With a token, the token protects the API.
+async fn check_host(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    if state.token.is_some() {
+        return next.run(request).await;
+    }
+    let host = request
+        .headers()
+        .get(axum::http::header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    if is_loopback_host(host) {
+        next.run(request).await
+    } else {
+        (
+            axum::http::StatusCode::FORBIDDEN,
+            "BergPilot only answers requests addressed to localhost unless it runs with an \
+             access token (BERGPILOT_TOKEN).",
+        )
+            .into_response()
+    }
+}
+
+/// `host` from a Host header, with or without a port.
+fn is_loopback_host(host: &str) -> bool {
+    let name = if let Some(rest) = host.strip_prefix('[') {
+        // [::1]:7878
+        rest.split(']').next().unwrap_or("")
+    } else {
+        host.rsplit_once(':').map_or(host, |(name, _)| name)
+    };
+    name.eq_ignore_ascii_case("localhost")
+        || name
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
 }
 
 async fn require_token(State(state): State<AppState>, request: Request, next: Next) -> Response {
@@ -88,6 +128,34 @@ async fn require_token(State(state): State<AppState>, request: Request, next: Ne
             next.run(request).await
         }
         _ => ApiError::Unauthorized("a valid access token is required".to_owned()).into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_loopback_host;
+
+    #[test]
+    fn accepts_only_loopback_hosts() {
+        for host in [
+            "localhost",
+            "localhost:7878",
+            "127.0.0.1:7878",
+            "127.0.0.2",
+            "[::1]:7878",
+            "LOCALHOST",
+        ] {
+            assert!(is_loopback_host(host), "{host}");
+        }
+        for host in [
+            "evil.example",
+            "evil.example:7878",
+            "192.168.1.5:7878",
+            "",
+            "localhost.evil.example",
+        ] {
+            assert!(!is_loopback_host(host), "{host}");
+        }
     }
 }
 

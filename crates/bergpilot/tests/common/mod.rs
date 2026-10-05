@@ -152,6 +152,7 @@ pub async fn call(
     let request = Request::builder()
         .method(method)
         .uri(uri)
+        .header("host", "localhost")
         .header("content-type", "application/json")
         .body(match body {
             Some(body) => Body::from(body.to_string()),

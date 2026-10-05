@@ -287,6 +287,15 @@ async fn schedules_queue_jobs_when_due() {
     assert_eq!(listed[0]["schedule_id"], created["id"]);
     assert_eq!(listed[0]["status"], "queued");
 
+    // The worker is not running here, so the job stays queued and can be
+    // cancelled.
+    let job_id = listed[0]["id"].as_i64().unwrap();
+    let (status, cancelled) =
+        call(&router, "POST", &format!("/api/jobs/{job_id}/cancel"), None).await;
+    assert_eq!(status, StatusCode::OK, "{cancelled}");
+    assert_eq!(cancelled["status"], "cancelled");
+    assert!(cancelled.get("finished_at").is_some());
+
     // Disabling clears the next run.
     let schedule_id = created["id"].as_i64().unwrap();
     let mut disabled = schedule.clone();

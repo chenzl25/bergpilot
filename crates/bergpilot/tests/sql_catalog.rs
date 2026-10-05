@@ -209,3 +209,44 @@ async fn rejects_a_password_in_the_database_url() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(body["error"].as_str().unwrap().contains("password field"));
 }
+
+#[tokio::test]
+async fn refuses_foreign_host_names_without_a_token() {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).await.unwrap();
+    let request = |host: &str| {
+        Request::builder()
+            .uri("/api/catalogs")
+            .header("host", host)
+            .body(Body::empty())
+            .unwrap()
+    };
+    let open = app(AppState::new(store.clone(), None));
+    let rebinding = open
+        .clone()
+        .oneshot(request("evil.example:7878"))
+        .await
+        .unwrap();
+    assert_eq!(rebinding.status(), StatusCode::FORBIDDEN);
+    let local = open.oneshot(request("127.0.0.1:7878")).await.unwrap();
+    assert_eq!(local.status(), StatusCode::OK);
+
+    // With a token the token is the protection, whatever the host name.
+    let guarded = app(AppState::new(store, Some("secret".into())));
+    let response = guarded
+        .oneshot(
+            Request::builder()
+                .uri("/api/catalogs")
+                .header("host", "bergpilot.internal:7878")
+                .header("authorization", "Bearer secret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
