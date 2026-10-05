@@ -131,6 +131,23 @@ async fn require_token(State(state): State<AppState>, request: Request, next: Ne
     }
 }
 
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+pub async fn serve(addr: SocketAddr, state: AppState) -> anyhow::Result<()> {
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, app(state))
+        .with_graceful_shutdown(async {
+            let _ = tokio::signal::ctrl_c().await;
+        })
+        .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::is_loopback_host;
@@ -157,21 +174,4 @@ mod tests {
             assert!(!is_loopback_host(host), "{host}");
         }
     }
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
-}
-
-pub async fn serve(addr: SocketAddr, state: AppState) -> anyhow::Result<()> {
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app(state))
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
-        .await?;
-    Ok(())
 }
