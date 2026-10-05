@@ -6,8 +6,10 @@ import { createBrowserRouter, RouterProvider } from "react-router";
 import { ApiError, consumeTokenFromUrl } from "./api/client";
 import { Layout } from "./components/Layout";
 import { CatalogFormPage } from "./pages/CatalogForm";
+import { CatalogPage } from "./pages/CatalogPage";
 import { HomePage } from "./pages/Home";
 import { JobsPage } from "./pages/JobsPage";
+import { NamespacePage } from "./pages/NamespacePage";
 import { NotFoundPage } from "./pages/NotFound";
 import { SqlPage } from "./pages/SqlPage";
 import { TablePage } from "./pages/TablePage";
@@ -33,7 +35,9 @@ const router = createBrowserRouter([
     children: [
       { path: "/", element: <HomePage /> },
       { path: "/catalogs/new", element: <CatalogFormPage /> },
+      { path: "/catalogs/:id", element: <CatalogPage /> },
       { path: "/catalogs/:id/edit", element: <CatalogFormPage /> },
+      { path: "/catalogs/:id/namespaces/*", element: <NamespacePage /> },
       { path: "/catalogs/:id/tables/*", element: <TablePage /> },
       { path: "/sql", element: <SqlPage /> },
       { path: "/jobs", element: <JobsPage /> },

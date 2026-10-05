@@ -11,6 +11,7 @@ import type { MaintenanceTask } from "./generated/MaintenanceTask";
 import type { ScheduleInfo } from "./generated/ScheduleInfo";
 import type { ScheduleInput } from "./generated/ScheduleInput";
 import type { TableRef } from "./generated/TableRef";
+import type { NamespaceDetail } from "./generated/NamespaceDetail";
 import type { NamespaceList } from "./generated/NamespaceList";
 import type { PartitionStat } from "./generated/PartitionStat";
 import type { QueryResult } from "./generated/QueryResult";
@@ -111,6 +112,8 @@ export const api = {
     request<NamespaceList>(
       `/catalogs/${id}/namespaces${parent?.length ? `?parent=${encodeNamespace(parent)}` : ""}`,
     ),
+  namespace: (id: number, namespace: string[]) =>
+    request<NamespaceDetail>(`/catalogs/${id}/namespace?namespace=${encodeNamespace(namespace)}`),
   tables: (id: number, namespace: string[]) =>
     request<TableList>(`/catalogs/${id}/tables?namespace=${encodeNamespace(namespace)}`),
   table: (id: number, namespace: string[], name: string) =>

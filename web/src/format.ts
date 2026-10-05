@@ -52,3 +52,12 @@ export function sqlTableName(catalog: string, namespace: string[], table: string
   const quote = (part: string) => (/^[a-z_][a-z0-9_]*$/.test(part) ? part : `"${part.replace(/"/g, '""')}"`);
   return [catalog, quote(namespace.join(".")), quote(table)].join(".");
 }
+
+export function namespacePath(catalogId: number, namespace: string[]): string {
+  return `/catalogs/${catalogId}/namespaces/${namespace.map(encodeURIComponent).join("/")}`;
+}
+
+/** Path segments after a route's `*`, decoded. */
+export function splatSegments(splat: string | undefined): string[] {
+  return (splat ?? "").split("/").filter(Boolean).map(decodeURIComponent);
+}

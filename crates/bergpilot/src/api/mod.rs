@@ -23,6 +23,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/catalogs/{id}/namespaces", get(browse::namespaces))
         .route("/catalogs/{id}/tables", get(browse::tables))
+        .route("/catalogs/{id}/namespace", get(browse::namespace_detail))
         .route("/catalogs/{id}/table", get(browse::table))
         .route("/catalogs/{id}/table/files", get(browse::files))
         .route("/catalogs/{id}/table/partitions", get(browse::partitions))

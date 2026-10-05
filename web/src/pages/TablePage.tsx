@@ -8,7 +8,7 @@ import type { TableDetail } from "../api/generated/TableDetail";
 import { errorMessage } from "../components/Layout";
 import { MaintenanceTab } from "../components/MaintenanceTab";
 import { TrendChart } from "../components/TrendChart";
-import { formatAge, formatBytes, formatNumber, formatTime, sqlTableName } from "../format";
+import { formatAge, formatBytes, formatNumber, formatTime, namespacePath, sqlTableName } from "../format";
 
 const TABS = ["overview", "schema", "snapshots", "files", "maintenance"] as const;
 type Tab = (typeof TABS)[number];
@@ -46,7 +46,13 @@ export function TablePage() {
       <div className="page-header">
         <div>
           <div className="breadcrumb">
-            {detail.catalog} / {namespace.join(" / ")}
+            <Link to={`/catalogs/${catalogId}`}>{detail.catalog}</Link>
+            {namespace.map((level, index) => (
+              <span key={index}>
+                {" / "}
+                <Link to={namespacePath(catalogId, namespace.slice(0, index + 1))}>{level}</Link>
+              </span>
+            ))}
           </div>
           <h1>{name}</h1>
         </div>

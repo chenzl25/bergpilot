@@ -7,7 +7,13 @@ use super::split_namespace;
 use crate::error::{ApiError, ApiResult};
 use crate::metadata::table_detail;
 use crate::server::AppState;
-use crate::types::{FileStats, NamespaceList, TableDetail, TableList};
+use crate::types::{
+    FileStats, NamespaceDetail, NamespaceList, TableDetail, TableList, TableSummary,
+};
+
+/// Tables summarized per namespace page.
+const SUMMARY_LIMIT: usize = 500;
+const SUMMARY_CONCURRENCY: usize = 8;
 
 #[derive(Deserialize)]
 pub struct NamespaceQuery {
@@ -98,6 +104,92 @@ pub async fn files(
         .transpose()?;
     let table = connected.catalog.load_table(&ident).await?;
     Ok(Json(state.file_stats.stats(&table, snapshot_id).await?))
+}
+
+/// A namespace with its properties, children and a summary of each table.
+pub async fn namespace_detail(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Query(query): Query<TablesQuery>,
+) -> ApiResult<Json<NamespaceDetail>> {
+    use futures::StreamExt;
+
+    let connected = state.registry.get(id).await?;
+    let namespace = namespace_ident(&query.namespace)?;
+    let catalog = connected.catalog.clone();
+    let (properties, children, tables) = tokio::try_join!(
+        async { catalog.get_namespace(&namespace).await },
+        async { catalog.list_namespaces(Some(&namespace)).await },
+        async { catalog.list_tables(&namespace).await },
+    )?;
+    let mut names: Vec<String> = tables.iter().map(|ident| ident.name().to_owned()).collect();
+    names.sort();
+    let truncated = names.len() > SUMMARY_LIMIT;
+    names.truncate(SUMMARY_LIMIT);
+    let mut summaries: Vec<TableSummary> = futures::stream::iter(names)
+        .map(|name| {
+            let catalog = catalog.clone();
+            let ident = TableIdent::new(namespace.clone(), name.clone());
+            async move {
+                match catalog.load_table(&ident).await {
+                    Ok(table) => summarize(name, &table),
+                    Err(error) => TableSummary {
+                        name,
+                        format_version: None,
+                        records: None,
+                        data_files: None,
+                        data_bytes: None,
+                        delete_files: None,
+                        snapshots: 0,
+                        last_updated_ms: None,
+                        error: Some(error.to_string()),
+                    },
+                }
+            }
+        })
+        .buffer_unordered(SUMMARY_CONCURRENCY)
+        .collect()
+        .await;
+    summaries.sort_by(|a, b| a.name.cmp(&b.name));
+    let mut child_namespaces: Vec<Vec<String>> =
+        children.into_iter().map(NamespaceIdent::inner).collect();
+    child_namespaces.sort();
+    Ok(Json(NamespaceDetail {
+        namespace: namespace.inner(),
+        properties: properties
+            .properties()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+        child_namespaces,
+        tables: summaries,
+        truncated,
+    }))
+}
+
+fn summarize(name: String, table: &iceberg::table::Table) -> TableSummary {
+    let metadata = table.metadata();
+    let summary = metadata
+        .current_snapshot()
+        .map(|snapshot| &snapshot.summary().additional_properties);
+    let number = |key: &str| {
+        summary
+            .and_then(|summary| summary.get(key))
+            .and_then(|value| value.parse::<u64>().ok())
+    };
+    let empty = metadata.current_snapshot().is_none();
+    let or_zero = |value: Option<u64>| if empty { Some(0) } else { value };
+    TableSummary {
+        name,
+        format_version: Some(metadata.format_version() as u8),
+        records: or_zero(number("total-records")),
+        data_files: or_zero(number("total-data-files")),
+        data_bytes: or_zero(number("total-files-size")),
+        delete_files: or_zero(number("total-delete-files")),
+        snapshots: metadata.snapshots().len() as u32,
+        last_updated_ms: Some(metadata.last_updated_ms()),
+        error: None,
+    }
 }
 
 pub async fn partitions(

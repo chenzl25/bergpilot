@@ -1000,3 +1000,92 @@ details.paths ul {
   margin-right: 6px;
   vertical-align: middle;
 }
+
+/* Explorer folders: chevron toggles, name navigates */
+
+.tree-folder {
+  padding: 0;
+  gap: 0;
+}
+
+.tree-folder:hover {
+  background: none;
+}
+
+.chevron-button {
+  border: 0;
+  background: none;
+  height: 26px;
+  width: 22px;
+  padding: 0 0 0 6px;
+  justify-content: flex-start;
+}
+
+.tree-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px 4px 4px;
+  border-radius: 5px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-label:hover {
+  background: var(--bg);
+  text-decoration: none;
+}
+
+.tree-label.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel);
+}
+
+.chip:hover {
+  border-color: var(--accent);
+  text-decoration: none;
+}
+
+th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+th.sortable:hover {
+  color: var(--text);
+}
+
+.badge.attention {
+  background: #fdf3e3;
+  border-color: #efd5a5;
+  color: #8a5a12;
+  margin: 0 6px 0 0;
+}
+
+.badge.attention:hover {
+  text-decoration: none;
+  border-color: #d8a94f;
+}
+
+.breadcrumb a {
+  color: var(--muted);
+}

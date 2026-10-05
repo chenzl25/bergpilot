@@ -91,6 +91,19 @@ async fn browses_and_queries_a_sql_catalog() {
     assert_eq!(status, StatusCode::OK, "{result}");
     assert_eq!(result["rows"], json!([["eu", "60.0"], ["us", "150.0"]]));
 
+    let (status, ns) = call(
+        &router,
+        "GET",
+        &format!("/api/catalogs/{id}/namespace?namespace=sales"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ns}");
+    assert_eq!(ns["tables"][0]["name"], "orders");
+    assert_eq!(ns["tables"][0]["records"], 6);
+    assert_eq!(ns["tables"][0]["data_files"], 4);
+    assert_eq!(ns["tables"][0]["snapshots"], 2);
+
     // Metadata tables.
     let query = |sql: &str| {
         let router = router.clone();

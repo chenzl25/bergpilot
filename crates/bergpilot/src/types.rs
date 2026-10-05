@@ -570,3 +570,45 @@ pub struct ScheduleInput {
     pub cron: String,
     pub enabled: bool,
 }
+
+/// Key numbers of a table from its current snapshot summary (no manifest
+/// reads), for overviews.
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct TableSummary {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub format_version: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub records: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub data_files: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub data_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub delete_files: Option<u64>,
+    pub snapshots: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub last_updated_ms: Option<i64>,
+    /// Set when the table could not be loaded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct NamespaceDetail {
+    pub namespace: Vec<String>,
+    pub properties: BTreeMap<String, String>,
+    pub child_namespaces: Vec<Vec<String>>,
+    pub tables: Vec<TableSummary>,
+    /// True when only the first tables were summarized.
+    pub truncated: bool,
+}

@@ -4,7 +4,7 @@ import { Link, NavLink } from "react-router";
 
 import { api } from "../api/client";
 import type { CatalogSummary } from "../api/generated/CatalogSummary";
-import { tablePath } from "../format";
+import { namespacePath, tablePath } from "../format";
 import { errorMessage } from "./Layout";
 
 /** Catalog → namespace → table tree. Levels load when expanded. */
@@ -35,7 +35,13 @@ function CatalogNode({ catalog }: { catalog: CatalogSummary }) {
   const [open, setOpen] = useState(false);
   return (
     <li>
-      <TreeRow open={open} onToggle={() => setOpen(!open)} label={catalog.name} kind="catalog" />
+      <TreeRow
+        open={open}
+        onToggle={() => setOpen(!open)}
+        label={catalog.name}
+        kind="catalog"
+        to={`/catalogs/${catalog.id}`}
+      />
       {open && <NamespaceChildren catalogId={catalog.id} parent={[]} />}
     </li>
   );
@@ -89,23 +95,35 @@ function NamespaceNode({ catalogId, levels }: { catalogId: number; levels: strin
         onToggle={() => setOpen(!open)}
         label={levels[levels.length - 1]}
         kind="namespace"
+        to={namespacePath(catalogId, levels)}
       />
       {open && <NamespaceChildren catalogId={catalogId} parent={levels} />}
     </li>
   );
 }
 
+/** A folder row: the chevron expands it, the name opens its page. */
 function TreeRow(props: {
   open: boolean;
   onToggle: () => void;
   label: string;
   kind: "catalog" | "namespace";
+  to: string;
 }) {
   return (
-    <button className="tree-row" onClick={props.onToggle} aria-expanded={props.open}>
-      <span className={`chevron ${props.open ? "open" : ""}`}>▸</span>
-      <span className={`tree-icon ${props.kind}-icon`} />
-      {props.label}
-    </button>
+    <div className="tree-row tree-folder">
+      <button
+        className="chevron-button"
+        onClick={props.onToggle}
+        aria-expanded={props.open}
+        aria-label={`${props.open ? "Collapse" : "Expand"} ${props.label}`}
+      >
+        <span className={`chevron ${props.open ? "open" : ""}`}>▸</span>
+      </button>
+      <NavLink className="tree-label" to={props.to} end onClick={() => !props.open && props.onToggle()}>
+        <span className={`tree-icon ${props.kind}-icon`} />
+        {props.label}
+      </NavLink>
+    </div>
   );
 }
