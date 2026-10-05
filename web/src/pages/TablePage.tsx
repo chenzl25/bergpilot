@@ -8,12 +8,14 @@ import type { TableDetail } from "../api/generated/TableDetail";
 import { errorMessage } from "../components/Layout";
 import { MaintenanceTab } from "../components/MaintenanceTab";
 import { TrendChart } from "../components/TrendChart";
+import { Results } from "./SqlPage";
 import { formatAge, formatBytes, formatNumber, formatTime, namespacePath, sqlTableName } from "../format";
 
-const TABS = ["overview", "schema", "snapshots", "files", "maintenance"] as const;
+const TABS = ["overview", "data", "schema", "snapshots", "files", "maintenance"] as const;
 type Tab = (typeof TABS)[number];
 const TAB_LABELS: Record<Tab, string> = {
   overview: "Overview",
+  data: "Data",
   schema: "Schema",
   snapshots: "Snapshots",
   files: "Files",
@@ -73,6 +75,7 @@ export function TablePage() {
         ))}
       </div>
       {tab === "overview" && <Overview detail={detail} />}
+      {tab === "data" && <DataTab sql={`SELECT * FROM ${sqlTableName(detail.catalog, namespace, name)} LIMIT 50`} />}
       {tab === "schema" && <SchemaTab detail={detail} />}
       {tab === "snapshots" && <SnapshotsTab detail={detail} />}
       {tab === "files" && <FilesTab detail={detail} catalogId={catalogId} namespace={namespace} />}
@@ -159,6 +162,20 @@ function Stat({ label, value, title }: { label: string; value: string; title?: s
     <div className="stat" title={title}>
       <div className="stat-value">{value}</div>
       <div className="stat-label">{label}</div>
+    </div>
+  );
+}
+
+function DataTab({ sql }: { sql: string }) {
+  const rows = useQuery({ queryKey: ["preview-rows", sql], queryFn: () => api.query(sql, 50) });
+  if (rows.isPending) return <p className="muted">Reading rows…</p>;
+  if (rows.isError) return <p className="error">{errorMessage(rows.error)}</p>;
+  return (
+    <div>
+      <p className="muted small">
+        The first 50 rows of the current snapshot. <Link to={`/sql?q=${encodeURIComponent(sql)}`}>Open in SQL</Link>
+      </p>
+      <Results result={rows.data} />
     </div>
   );
 }

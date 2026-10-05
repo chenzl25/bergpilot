@@ -10,6 +10,23 @@ import { errorMessage } from "../components/Layout";
 import { formatNumber } from "../format";
 
 const STORAGE_KEY = "bergpilot.sql";
+const HISTORY_KEY = "bergpilot.sql-history";
+const HISTORY_SIZE = 30;
+
+function loadHistory(): string[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function remember(statement: string): string[] {
+  const history = [statement, ...loadHistory().filter((item) => item !== statement)].slice(0, HISTORY_SIZE);
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  return history;
+}
 const DEFAULT_SQL = `-- Tables are named catalog.namespace.table.
 -- Metadata tables: catalog.namespace."table$snapshots", $history, $refs,
 -- $manifests, $files and $partitions.
@@ -32,7 +49,11 @@ export function SqlPage() {
     localStorage.setItem(STORAGE_KEY, text);
   }, [text]);
 
-  const run = useMutation({ mutationFn: (statement: string) => api.query(statement) });
+  const [history, setHistory] = useState(loadHistory);
+  const run = useMutation({
+    mutationFn: (statement: string) => api.query(statement),
+    onSuccess: (_, statement) => setHistory(remember(statement.trim())),
+  });
   const execute = useCallback(() => {
     if (text.trim() && !run.isPending) run.mutate(text);
   }, [run, text]);
@@ -71,6 +92,20 @@ export function SqlPage() {
       </div>
       {run.isError && <div className="notice bad mono">{errorMessage(run.error)}</div>}
       {run.data && <Results result={run.data} />}
+      {history.length > 0 && (
+        <details className="history">
+          <summary>Recent queries ({history.length})</summary>
+          <ul>
+            {history.map((statement) => (
+              <li key={statement}>
+                <button className="history-item mono" onClick={() => setText(statement)} title="Put in the editor">
+                  {statement}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
     </div>
   );
 }
@@ -94,7 +129,7 @@ function downloadCsv(result: QueryResult) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function Results({ result }: { result: QueryResult }) {
+export function Results({ result }: { result: QueryResult }) {
   return (
     <div className="results">
       <div className="results-meta muted small">
