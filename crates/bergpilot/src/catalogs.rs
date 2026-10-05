@@ -31,9 +31,9 @@ pub async fn connect(record: &CatalogRecord) -> ApiResult<Arc<dyn Catalog>> {
     let storage = Arc::new(OpenDalResolvingStorageFactory::new());
     let name = record.name.clone();
     let failed = |error: iceberg::Error| {
-        ApiError::Upstream(format!(
-            "failed to connect to catalog {}: {error}",
-            record.name
+        ApiError::Upstream(redact(
+            &format!("failed to connect to catalog {}: {error}", record.name),
+            record,
         ))
     };
     let catalog: Arc<dyn Catalog> = match record.kind {
@@ -80,6 +80,25 @@ pub async fn connect(record: &CatalogRecord) -> ApiResult<Arc<dyn Catalog>> {
         }
     };
     Ok(catalog)
+}
+
+/// Replace every stored secret value in `message` with `***`. Connection
+/// errors can echo URLs or headers, and for SQL catalogs the password is part
+/// of the database URL handed to the driver.
+pub fn redact(message: &str, record: &CatalogRecord) -> String {
+    let mut redacted = message.to_owned();
+    for secret in record.secrets.values() {
+        // Very short values would mangle unrelated text and reveal little.
+        if secret.len() >= 4 {
+            redacted = redacted.replace(secret.as_str(), "***");
+            let encoded =
+                url::form_urlencoded::byte_serialize(secret.as_bytes()).collect::<String>();
+            if encoded != *secret {
+                redacted = redacted.replace(&encoded, "***");
+            }
+        }
+    }
+    redacted
 }
 
 /// Adapt BergPilot's SQL catalog settings to the iceberg-rust builder:
@@ -189,5 +208,35 @@ impl CatalogRegistry {
             },
         );
         Ok(Connected { record, catalog })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::redact;
+    use crate::store::CatalogRecord;
+    use crate::types::CatalogKind;
+
+    #[test]
+    fn redacts_secrets_from_errors() {
+        let record = CatalogRecord {
+            id: 1,
+            name: "pg".into(),
+            kind: CatalogKind::Sql,
+            properties: BTreeMap::new(),
+            secrets: BTreeMap::from([
+                ("password".to_owned(), "p@ss word".to_owned()),
+                ("token".to_owned(), "abc".to_owned()),
+            ]),
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        let message = "cannot reach postgres://iceberg:p%40ss+word@db/catalog (p@ss word)";
+        assert_eq!(
+            redact(message, &record),
+            "cannot reach postgres://iceberg:***@db/catalog (***)"
+        );
     }
 }
