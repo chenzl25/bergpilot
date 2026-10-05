@@ -7,6 +7,7 @@ import type { FileStats } from "../api/generated/FileStats";
 import type { TableDetail } from "../api/generated/TableDetail";
 import { errorMessage } from "../components/Layout";
 import { MaintenanceTab } from "../components/MaintenanceTab";
+import { PropertiesEditor } from "../components/PropertiesEditor";
 import { TrendChart } from "../components/TrendChart";
 import { attention } from "../health";
 import { Results } from "./SqlPage";
@@ -75,7 +76,7 @@ export function TablePage() {
           </button>
         ))}
       </div>
-      {tab === "overview" && <Overview detail={detail} />}
+      {tab === "overview" && <Overview detail={detail} catalogId={catalogId} />}
       {tab === "data" && <DataTab sql={`SELECT * FROM ${sqlTableName(detail.catalog, namespace, name)} LIMIT 50`} />}
       {tab === "schema" && <SchemaTab detail={detail} />}
       {tab === "snapshots" && <SnapshotsTab detail={detail} />}
@@ -87,7 +88,7 @@ export function TablePage() {
   );
 }
 
-function Overview({ detail }: { detail: TableDetail }) {
+function Overview({ detail, catalogId }: { detail: TableDetail; catalogId: number }) {
   const current = detail.snapshots.find((s) => s.snapshot_id === detail.current_snapshot_id);
   const summary = current?.summary ?? {};
   const notes = attention({
@@ -151,21 +152,10 @@ function Overview({ detail }: { detail: TableDetail }) {
               ))}
         </dd>
       </dl>
-      <h2>Properties</h2>
-      {Object.keys(detail.properties).length === 0 ? (
-        <p className="muted">No properties.</p>
-      ) : (
-        <table className="grid compact">
-          <tbody>
-            {Object.entries(detail.properties).map(([key, value]) => (
-              <tr key={key}>
-                <td className="mono">{key}</td>
-                <td className="mono">{value}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      <PropertiesEditor
+        detail={detail}
+        target={{ catalog_id: catalogId, namespace: detail.namespace, table: detail.name }}
+      />
     </div>
   );
 }

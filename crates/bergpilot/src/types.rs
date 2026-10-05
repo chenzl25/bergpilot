@@ -628,3 +628,15 @@ pub struct NamespaceNames {
     pub namespace: Vec<String>,
     pub tables: Vec<String>,
 }
+
+/// Change table properties: `set` adds or replaces, `remove` deletes.
+#[derive(Clone, Debug, Deserialize, TS)]
+#[ts(export)]
+pub struct PropertiesUpdate {
+    #[serde(flatten)]
+    pub target: TableRef,
+    #[serde(default)]
+    pub set: BTreeMap<String, String>,
+    #[serde(default)]
+    pub remove: Vec<String>,
+}

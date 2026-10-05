@@ -15,6 +15,7 @@ import type { TableRef } from "./generated/TableRef";
 import type { NamespaceDetail } from "./generated/NamespaceDetail";
 import type { NamespaceList } from "./generated/NamespaceList";
 import type { PartitionStat } from "./generated/PartitionStat";
+import type { PropertiesUpdate } from "./generated/PropertiesUpdate";
 import type { QueryResult } from "./generated/QueryResult";
 import type { ServerInfo } from "./generated/ServerInfo";
 import type { TableDetail } from "./generated/TableDetail";
@@ -128,6 +129,8 @@ export const api = {
         (snapshotId ? `&snapshot_id=${snapshotId}` : ""),
     ),
 
+  updateProperties: (update: PropertiesUpdate) =>
+    request<TableDetail>("/table/properties", { method: "POST", body: JSON.stringify(update) }),
   partitions: (id: number, namespace: string[], name: string) =>
     request<PartitionStat[]>(
       `/catalogs/${id}/table/partitions?namespace=${encodeNamespace(namespace)}&name=${encodeURIComponent(name)}`,

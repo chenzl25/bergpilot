@@ -1183,3 +1183,14 @@ tr.clickable:hover td {
   background: var(--bg);
   text-decoration: none;
 }
+
+.properties-editor {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 16px 12px;
+}
+
+.properties-editor .actions {
+  margin-top: 12px;
+}

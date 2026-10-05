@@ -110,6 +110,42 @@ async fn browses_and_queries_a_sql_catalog() {
         json!({ "namespaces": [{ "namespace": ["sales"], "tables": ["orders"] }], "truncated": false })
     );
 
+    // Properties: set and remove in one commit.
+    let (status, updated) = call(
+        &router,
+        "POST",
+        "/api/table/properties",
+        Some(json!({
+            "catalog_id": id, "namespace": ["sales"], "table": "orders",
+            "set": { "write.target-file-size-bytes": "134217728", "owner": "data-team" },
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(updated["properties"]["owner"], "data-team");
+    let (_, updated) = call(
+        &router,
+        "POST",
+        "/api/table/properties",
+        Some(json!({
+            "catalog_id": id, "namespace": ["sales"], "table": "orders", "remove": ["owner"],
+        })),
+    )
+    .await;
+    assert!(updated["properties"].get("owner").is_none(), "{updated}");
+    assert_eq!(
+        updated["properties"]["write.target-file-size-bytes"],
+        "134217728"
+    );
+    let (status, _) = call(
+        &router,
+        "POST",
+        "/api/table/properties",
+        Some(json!({ "catalog_id": id, "namespace": ["sales"], "table": "orders" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
     // Time travel: the first snapshot had three rows.
     let (_, first) = call(
         &router,

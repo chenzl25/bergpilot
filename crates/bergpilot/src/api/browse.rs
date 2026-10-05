@@ -257,6 +257,51 @@ pub async fn names(
     }))
 }
 
+/// Set and remove table properties in one commit; returns the new detail.
+pub async fn update_properties(
+    State(state): State<AppState>,
+    Json(update): Json<crate::types::PropertiesUpdate>,
+) -> ApiResult<Json<TableDetail>> {
+    use iceberg::transaction::{ApplyTransactionAction, Transaction};
+
+    if update.set.is_empty() && update.remove.is_empty() {
+        return Err(ApiError::BadRequest("nothing to change".to_owned()));
+    }
+    for key in update.set.keys().chain(update.remove.iter()) {
+        if key.trim().is_empty() {
+            return Err(ApiError::BadRequest(
+                "property names cannot be empty".to_owned(),
+            ));
+        }
+    }
+    if let Some(key) = update
+        .remove
+        .iter()
+        .find(|key| update.set.contains_key(*key))
+    {
+        return Err(ApiError::BadRequest(format!(
+            "{key} is both set and removed"
+        )));
+    }
+    let connected = state.registry.get(update.target.catalog_id).await?;
+    let ident = TableIdent::new(
+        NamespaceIdent::from_vec(update.target.namespace.clone())?,
+        update.target.table.clone(),
+    );
+    let table = connected.catalog.load_table(&ident).await?;
+    let tx = Transaction::new(&table);
+    let mut action = tx.update_table_properties();
+    for (key, value) in &update.set {
+        action = action.set(key.trim().to_owned(), value.clone());
+    }
+    for key in &update.remove {
+        action = action.remove(key.trim().to_owned());
+    }
+    let tx = action.apply(tx)?;
+    let updated = tx.commit(connected.catalog.as_ref()).await?;
+    Ok(Json(table_detail(&connected.record.name, &updated)))
+}
+
 pub async fn partitions(
     State(state): State<AppState>,
     Path(id): Path<i64>,
