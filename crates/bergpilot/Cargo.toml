@@ -9,3 +9,30 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+aes-gcm = "0.10"
+anyhow = "1"
+axum = "0.8"
+base64 = "0.22"
+clap = { version = "4", features = ["derive", "env"] }
+datafusion = { workspace = true }
+futures = "0.3"
+iceberg = { workspace = true }
+iceberg-catalog-rest = { workspace = true }
+iceberg-datafusion = { workspace = true }
+iceberg-storage-opendal = { workspace = true }
+lru = "0.16"
+mime_guess = "2"
+rand = "0.9"
+rust-embed = { version = "8", features = ["include-exclude"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio", "migrate", "macros"] }
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "fs", "time", "net", "sync"] }
+tower-http = { version = "0.6", features = ["trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ts-rs = { version = "11", features = ["serde-json-impl"] }
+
+[dev-dependencies]
+tempfile = "3"

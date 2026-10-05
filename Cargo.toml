@@ -9,3 +9,16 @@ rust-version = "1.94"
 license = "Apache-2.0"
 repository = "https://github.com/chenzl25/bergpilot"
 publish = false
+
+[workspace.dependencies]
+# The RisingWave fork of iceberg-rust, pinned to the revision iceberg-compaction uses.
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "edc64dc1975eb05a8b795f920980d9bee206eb61" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "edc64dc1975eb05a8b795f920980d9bee206eb61" }
+iceberg-datafusion = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "edc64dc1975eb05a8b795f920980d9bee206eb61" }
+iceberg-storage-opendal = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "edc64dc1975eb05a8b795f920980d9bee206eb61", default-features = false, features = ["opendal-fs", "opendal-memory", "opendal-s3"] }
+# Must match the DataFusion version the fork is built against.
+datafusion = "54.1.0"
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
