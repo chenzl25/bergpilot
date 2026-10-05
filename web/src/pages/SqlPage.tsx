@@ -72,12 +72,36 @@ export function SqlPage() {
   );
 }
 
+/** RFC 4180 CSV; NULL becomes an empty field. */
+function toCsv(result: QueryResult): string {
+  const field = (value: string | null) =>
+    value === null ? "" : /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+  const lines = [result.columns.map((column) => field(column.name)).join(",")];
+  for (const row of result.rows) lines.push(row.map(field).join(","));
+  return lines.join("\r\n") + "\r\n";
+}
+
+function downloadCsv(result: QueryResult) {
+  const blob = new Blob([toCsv(result)], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `bergpilot-${new Date().toISOString().replace(/[:.]/g, "-")}.csv`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function Results({ result }: { result: QueryResult }) {
   return (
     <div className="results">
       <div className="results-meta muted small">
         {formatNumber(result.rows.length)} row{result.rows.length === 1 ? "" : "s"}
         {result.truncated && " (more rows exist; showing the first ones)"} · {formatNumber(result.elapsed_ms)} ms
+        {result.rows.length > 0 && (
+          <button className="link" onClick={() => downloadCsv(result)}>
+            Download CSV
+          </button>
+        )}
       </div>
       <div className="results-scroll">
         <table className="grid results-grid">

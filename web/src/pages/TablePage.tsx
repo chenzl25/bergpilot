@@ -7,6 +7,7 @@ import type { FileStats } from "../api/generated/FileStats";
 import type { TableDetail } from "../api/generated/TableDetail";
 import { errorMessage } from "../components/Layout";
 import { MaintenanceTab } from "../components/MaintenanceTab";
+import { TrendChart } from "../components/TrendChart";
 import { formatAge, formatBytes, formatNumber, formatTime, sqlTableName } from "../format";
 
 const TABS = ["overview", "schema", "snapshots", "files", "maintenance"] as const;
@@ -193,6 +194,8 @@ function SnapshotsTab({ detail }: { detail: TableDetail }) {
   const newestFirst = [...detail.snapshots].reverse();
   if (newestFirst.length === 0) return <p className="muted">This table has no snapshots yet.</p>;
   return (
+    <>
+    <TrendChart snapshots={detail.snapshots} />
     <table className="grid">
       <thead>
         <tr>
@@ -238,6 +241,7 @@ function SnapshotsTab({ detail }: { detail: TableDetail }) {
         })}
       </tbody>
     </table>
+    </>
   );
 }
 
