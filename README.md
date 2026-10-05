@@ -2,29 +2,26 @@
 
 Observability and maintenance for Apache Iceberg™ tables, in a single Rust service. No JVM, no Spark.
 
-> **Status:** early. Connect REST, AWS Glue, S3 Tables and JDBC catalogs, browse namespaces and tables, inspect schemas, snapshots and file sizes, and run read-only SQL.
+![Maintenance tab](docs/images/maintenance.png)
 
-## Goals
+> **Status:** early, but usable. Try it against a test catalog first: maintenance operations change tables.
 
-- **Catalogs:** connect to REST, AWS Glue, S3 Tables and JDBC catalogs.
-- **Observability:** browse namespaces and tables; inspect schemas, partition specs, snapshots, branches, manifests and data/delete files; show file-size distribution and how it changes over time.
-- **SQL inspection:** run read queries against tables with Apache DataFusion.
-- **Maintenance:** compaction, snapshot expiry, orphan-file cleanup and manifest rewrites, on demand or on a schedule.
+## What it does
 
-## Built on
+- **Browse** catalogs, nested namespaces and tables. Namespace pages summarize every table and point
+  out the ones worth a look (many small files, delete files, long snapshot histories).
+- **Inspect a table:** schema, partitioning and properties; snapshot history with a trend chart of
+  records, files and size; files by size for any snapshot; a per-partition breakdown; the first rows.
+- **Query** with SQL (Apache DataFusion), read-only. Metadata tables such as
+  `catalog.ns."table$files"` and `"table$partitions"` work too. Results export to CSV.
+- **Maintain:** compact data files, expire snapshots (optionally deleting their files), remove
+  orphan files and rewrite manifests. Each has a preview that changes nothing, runs as a background
+  job, and can be scheduled with cron.
 
-- [risingwavelabs/iceberg-rust](https://github.com/risingwavelabs/iceberg-rust): catalogs, metadata, scans, DataFusion integration and maintenance actions.
-- [nimtable/iceberg-compaction](https://github.com/nimtable/iceberg-compaction): data-file compaction on DataFusion.
-
-Both are git dependencies pinned to a revision, so BergPilot is not published to crates.io. Binaries and container images will be the release artifacts.
-
-BergPilot is inspired by [Nimtable](https://github.com/nimtable/nimtable) and may reuse parts of it under the Apache License 2.0.
-
-## Roadmap
-
-1. **Read-only (done):** REST catalogs, browsing, table detail, file-size distribution, `SELECT` queries.
-2. **More catalogs (done):** AWS Glue, S3 Tables and JDBC.
-3. **Maintenance:** compaction, snapshot expiry, orphan cleanup and manifest rewrites, with scheduling.
+| | |
+| --- | --- |
+| ![Namespace](docs/images/namespace.png) | ![Snapshots](docs/images/snapshots.png) |
+| ![Files](docs/images/files.png) | ![SQL](docs/images/sql.png) |
 
 ## Catalogs
 
@@ -37,7 +34,9 @@ BergPilot is inspired by [Nimtable](https://github.com/nimtable/nimtable) and ma
 
 ## Running
 
-Build the web UI, then the server; the release binary embeds the UI:
+Prebuilt binaries for Linux (x86_64, aarch64) and macOS (Apple silicon) are attached to
+[releases](https://github.com/chenzl25/bergpilot/releases). To build from source, build the web UI
+first; the release binary embeds it:
 
 ```bash
 pnpm --dir web install
@@ -47,11 +46,34 @@ cargo build --release
 ```
 
 Open http://127.0.0.1:7878 and add a catalog. BergPilot keeps its database and secret key in
-`~/.bergpilot` (`--data-dir` to change). It listens on 127.0.0.1; to listen on another address,
-set an access token with `BERGPILOT_TOKEN` and pass `--bind 0.0.0.0:7878`.
+`~/.bergpilot` (`--data-dir` to change).
 
 In SQL, tables are named `catalog.namespace.table`. Write a nested namespace as one quoted
-identifier: `prod."sales.eu".orders`. Only read-only queries run.
+identifier: `prod."sales.eu".orders`, and a metadata table as `prod.sales."orders$snapshots"`.
+
+## Safety
+
+- BergPilot listens on 127.0.0.1 and answers only requests addressed to `localhost` (against DNS
+  rebinding). To listen on another address, set an access token with `BERGPILOT_TOKEN` and pass
+  `--bind 0.0.0.0:7878`; the UI asks for the token.
+- Catalog secrets are encrypted at rest with a key in the data directory and never sent to the
+  browser.
+- SQL is read-only. Maintenance needs an explicit click and confirmation, or a schedule you create.
+- Orphan-file removal compares normalized paths, never deletes files younger than a day, and
+  refuses to run if it cannot find the table's own current files in the storage listing.
+- Maintenance runs on the machine BergPilot runs on, reading and writing data through it. Run it
+  close to the data for large tables.
+
+## Built on
+
+- [risingwavelabs/iceberg-rust](https://github.com/risingwavelabs/iceberg-rust): catalogs,
+  metadata, scans, DataFusion integration and maintenance actions.
+- [nimtable/iceberg-compaction](https://github.com/nimtable/iceberg-compaction): data-file compaction.
+- [Apache DataFusion](https://datafusion.apache.org/), [axum](https://github.com/tokio-rs/axum),
+  React and Vite.
+
+The Iceberg crates are git dependencies pinned to a revision, so BergPilot is not published to
+crates.io. BergPilot is inspired by [Nimtable](https://github.com/nimtable/nimtable).
 
 ## Development
 
@@ -70,11 +92,13 @@ region `us-east-1`, access key `admin`, secret `password`, and path-style access
 To seed other catalog types (for example Glue in a [moto](https://github.com/getmoto/moto) server),
 see the environment variables at the top of `crates/bergpilot/examples/seed.rs`.
 
-`cargo test` regenerates the TypeScript API types in `web/src/api/generated`; commit them with any
-change to `crates/bergpilot/src/types.rs`.
+`cargo test` runs unit tests and integration tests against a SQLite catalog with a local
+warehouse, and regenerates the TypeScript API types in `web/src/api/generated`; commit them with
+any change to `crates/bergpilot/src/types.rs`. Tagging `v*` builds the release binaries.
 
 ## License
 
 [Apache License 2.0](LICENSE).
 
-Apache®, Apache Iceberg™, Apache DataFusion™ and their logos are trademarks of the Apache Software Foundation. BergPilot is not affiliated with or endorsed by the Apache Software Foundation.
+Apache®, Apache Iceberg™, Apache DataFusion™ and their logos are trademarks of the Apache Software
+Foundation. BergPilot is not affiliated with or endorsed by the Apache Software Foundation.

@@ -1,10 +1,31 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, NavLink } from "react-router";
+import { Link, NavLink, useLocation } from "react-router";
 
 import { api } from "../api/client";
 import type { CatalogSummary } from "../api/generated/CatalogSummary";
-import { namespacePath, tablePath } from "../format";
+import { namespacePath, splatSegments, tablePath } from "../format";
+
+/** The catalog and namespace the current page is about, if any. */
+function useRouteTarget(): { catalogId: number; namespace: string[] } | null {
+  const { pathname } = useLocation();
+  const match = pathname.match(/^\/catalogs\/(\d+)(?:\/(namespaces|tables)\/(.*))?$/);
+  if (!match) return null;
+  const segments = splatSegments(match[3]);
+  return {
+    catalogId: Number(match[1]),
+    namespace: match[2] === "tables" ? segments.slice(0, -1) : segments,
+  };
+}
+
+/** Open a node when the current page is inside it. */
+function useOpenOnPath(onPath: boolean) {
+  const [open, setOpen] = useState(onPath);
+  useEffect(() => {
+    if (onPath) setOpen(true);
+  }, [onPath]);
+  return [open, setOpen] as const;
+}
 import { errorMessage } from "./Layout";
 
 /** Catalog → namespace → table tree. Levels load when expanded. */
@@ -32,7 +53,8 @@ export function Explorer() {
 }
 
 function CatalogNode({ catalog }: { catalog: CatalogSummary }) {
-  const [open, setOpen] = useState(false);
+  const target = useRouteTarget();
+  const [open, setOpen] = useOpenOnPath(target?.catalogId === catalog.id);
   return (
     <li>
       <TreeRow
@@ -87,7 +109,12 @@ function NamespaceChildren({ catalogId, parent }: { catalogId: number; parent: s
 }
 
 function NamespaceNode({ catalogId, levels }: { catalogId: number; levels: string[] }) {
-  const [open, setOpen] = useState(false);
+  const target = useRouteTarget();
+  const onPath =
+    target?.catalogId === catalogId &&
+    target.namespace.length >= levels.length &&
+    levels.every((level, index) => target.namespace[index] === level);
+  const [open, setOpen] = useOpenOnPath(onPath);
   return (
     <li>
       <TreeRow
