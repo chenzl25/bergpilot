@@ -13,7 +13,8 @@ Observability and maintenance for Apache Iceberg™ tables, in a single Rust ser
 - **Inspect a table:** schema, partitioning and properties; snapshot history with a trend chart of
   records, files and size; files by size for any snapshot; a per-partition breakdown; the first rows.
 - **Query** with SQL (Apache DataFusion), read-only. Metadata tables such as
-  `catalog.ns."table$files"` and `"table$partitions"` work too. Results export to CSV.
+  `catalog.ns."table$files"` and `"table$partitions"` work too, and `"table@<snapshot or branch>"`
+  reads a table as it was. Results export to CSV.
 - **Maintain:** compact data files, expire snapshots (optionally deleting their files), remove
   orphan files and rewrite manifests. Each has a preview that changes nothing, runs as a background
   job, and can be scheduled with cron.
@@ -49,7 +50,8 @@ Open http://127.0.0.1:7878 and add a catalog. BergPilot keeps its database and s
 `~/.bergpilot` (`--data-dir` to change).
 
 In SQL, tables are named `catalog.namespace.table`. Write a nested namespace as one quoted
-identifier: `prod."sales.eu".orders`, and a metadata table as `prod.sales."orders$snapshots"`.
+identifier: `prod."sales.eu".orders`, a metadata table as `prod.sales."orders$snapshots"`, and an
+older version as `prod.sales."orders@<snapshot id>"` or `"orders@<branch or tag>"`.
 
 ## Safety
 

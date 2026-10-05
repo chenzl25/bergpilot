@@ -104,6 +104,50 @@ async fn browses_and_queries_a_sql_catalog() {
     assert_eq!(ns["tables"][0]["data_files"], 4);
     assert_eq!(ns["tables"][0]["snapshots"], 2);
 
+    // Time travel: the first snapshot had three rows.
+    let (_, first) = call(
+        &router,
+        "POST",
+        "/api/query",
+        Some(json!({
+            "sql": r#"SELECT snapshot_id FROM local.sales."orders$snapshots"
+                      ORDER BY sequence_number LIMIT 1"#
+        })),
+    )
+    .await;
+    let first_snapshot = first["rows"][0][0].as_str().unwrap().to_owned();
+    let (status, travelled) = call(
+        &router,
+        "POST",
+        "/api/query",
+        Some(json!({
+            "sql": format!(r#"SELECT count(*) FROM local.sales."orders@{first_snapshot}""#)
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{travelled}");
+    let first_count = travelled["rows"][0][0].as_str().unwrap();
+    assert!(
+        first_count == "3",
+        "first snapshot holds 3 rows, got {first_count}"
+    );
+    let (_, on_main) = call(
+        &router,
+        "POST",
+        "/api/query",
+        Some(json!({ "sql": r#"SELECT count(*) FROM local.sales."orders@main""# })),
+    )
+    .await;
+    assert_eq!(on_main["rows"], json!([["6"]]));
+    let (status, _) = call(
+        &router,
+        "POST",
+        "/api/query",
+        Some(json!({ "sql": r#"SELECT count(*) FROM local.sales."orders@nope""# })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
     // Metadata tables.
     let query = |sql: &str| {
         let router = router.clone();

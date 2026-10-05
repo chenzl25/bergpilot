@@ -270,6 +270,14 @@ function SnapshotsTab({ detail }: { detail: TableDetail }) {
             {open && (
               <tr className="detail-row">
                 <td colSpan={8}>
+                  <Link
+                    className="small"
+                    to={`/sql?q=${encodeURIComponent(
+                      `SELECT * FROM ${sqlTableName(detail.catalog, detail.namespace, `${detail.name}@${snapshot.snapshot_id}`)} LIMIT 100`,
+                    )}`}
+                  >
+                    Query the table as of this snapshot
+                  </Link>
                   <dl className="summary-grid">
                     <dt>Snapshot</dt>
                     <dd className="mono">{snapshot.snapshot_id}</dd>

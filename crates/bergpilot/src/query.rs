@@ -4,7 +4,8 @@
 //! quoted, dot-separated identifier: `dev."a.b".events`. Only the tables a
 //! query mentions are loaded, each pinned to its current snapshot.
 //! Metadata tables are `"table$kind"`, e.g. `dev.demo."events$files"` (see
-//! `metadata_tables`).
+//! `metadata_tables`); `"table@snapshot"` reads the table as of a snapshot
+//! id, branch or tag.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -189,16 +190,19 @@ async fn register_tables(
             .await?
             .ok_or_else(|| ApiError::BadRequest(format!("there is no catalog named {catalog}")))?;
         let namespace = NamespaceIdent::from_strs(schema.split('.'))?;
-        // `events$files` reads the metadata table `files` of `events`.
-        let (base, metadata_kind) = match table.split_once('$') {
-            Some((base, kind)) => (base, Some(kind)),
-            None => (table.as_ref(), None),
-        };
-        let ident = TableIdent::new(namespace, base.to_owned());
+        let name = TableName::parse(table);
+        let ident = TableIdent::new(namespace, name.base.to_owned());
         let loaded = connected.catalog.load_table(&ident).await?;
-        let provider: Arc<dyn datafusion::catalog::TableProvider> = match metadata_kind {
-            Some(kind) => Arc::new(crate::metadata_tables::build(&loaded, kind).await?),
-            None => Arc::new(IcebergStaticTableProvider::try_new_from_table(loaded).await?),
+        let provider: Arc<dyn datafusion::catalog::TableProvider> = match (name.metadata, name.at) {
+            (Some(kind), _) => Arc::new(crate::metadata_tables::build(&loaded, kind).await?),
+            (None, Some(selector)) => {
+                let snapshot_id = resolve_snapshot(&loaded, selector)?;
+                Arc::new(
+                    IcebergStaticTableProvider::try_new_from_table_snapshot(loaded, snapshot_id)
+                        .await?,
+                )
+            }
+            (None, None) => Arc::new(IcebergStaticTableProvider::try_new_from_table(loaded).await?),
         };
 
         let catalog_provider = catalogs
@@ -226,6 +230,61 @@ async fn register_tables(
         }
     }
     Ok(())
+}
+
+/// A table name in SQL: `events`, `events$files` (a metadata table) or
+/// `events@1234` / `events@main` (the table as of a snapshot, branch or tag).
+#[derive(Debug, PartialEq, Eq)]
+struct TableName<'a> {
+    base: &'a str,
+    metadata: Option<&'a str>,
+    at: Option<&'a str>,
+}
+
+impl<'a> TableName<'a> {
+    fn parse(name: &'a str) -> Self {
+        if let Some((base, kind)) = name.split_once('$') {
+            return TableName {
+                base,
+                metadata: Some(kind),
+                at: None,
+            };
+        }
+        if let Some((base, at)) = name.rsplit_once('@')
+            && !base.is_empty()
+            && !at.is_empty()
+        {
+            return TableName {
+                base,
+                metadata: None,
+                at: Some(at),
+            };
+        }
+        TableName {
+            base: name,
+            metadata: None,
+            at: None,
+        }
+    }
+}
+
+/// A snapshot id, or the snapshot a branch or tag points at.
+fn resolve_snapshot(table: &iceberg::table::Table, selector: &str) -> ApiResult<i64> {
+    let metadata = table.metadata();
+    if let Ok(id) = selector.parse::<i64>()
+        && metadata.snapshot_by_id(id).is_some()
+    {
+        return Ok(id);
+    }
+    metadata
+        .snapshot_for_ref(selector)
+        .map(|snapshot| snapshot.snapshot_id())
+        .ok_or_else(|| {
+            ApiError::BadRequest(format!(
+                "{selector:?} is neither a snapshot id nor a branch or tag of {}",
+                table.identifier().name()
+            ))
+        })
 }
 
 /// Append up to `limit` rows in total; returns true once more rows exist.
@@ -257,4 +316,54 @@ fn append_rows(
         );
     }
     Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TableName;
+
+    #[test]
+    fn parses_table_names() {
+        let parse = TableName::parse;
+        assert_eq!(
+            parse("events"),
+            TableName {
+                base: "events",
+                metadata: None,
+                at: None
+            }
+        );
+        assert_eq!(
+            parse("events$files"),
+            TableName {
+                base: "events",
+                metadata: Some("files"),
+                at: None
+            }
+        );
+        assert_eq!(
+            parse("events@123"),
+            TableName {
+                base: "events",
+                metadata: None,
+                at: Some("123")
+            }
+        );
+        assert_eq!(
+            parse("events@main"),
+            TableName {
+                base: "events",
+                metadata: None,
+                at: Some("main")
+            }
+        );
+        assert_eq!(
+            parse("@x"),
+            TableName {
+                base: "@x",
+                metadata: None,
+                at: None
+            }
+        );
+    }
 }

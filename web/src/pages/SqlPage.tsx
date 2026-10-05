@@ -29,7 +29,8 @@ function remember(statement: string): string[] {
 }
 const DEFAULT_SQL = `-- Tables are named catalog.namespace.table.
 -- Metadata tables: catalog.namespace."table$snapshots", $history, $refs,
--- $manifests, $files and $partitions.
+-- $manifests, $files and $partitions. Time travel: "table@<snapshot id>"
+-- or "table@<branch or tag>".
 SELECT 1 AS ok`;
 
 export function SqlPage() {
