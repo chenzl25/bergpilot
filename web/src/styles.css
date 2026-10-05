@@ -1119,3 +1119,32 @@ th.sortable:hover {
   max-height: 4.5em;
   overflow: hidden;
 }
+
+tr.clickable {
+  cursor: pointer;
+}
+
+tr.clickable:hover td {
+  background: #f8fafc;
+}
+
+.detail-row td {
+  background: #fbfcfd;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 4px 16px;
+  margin: 4px 0;
+  font-size: 12.5px;
+}
+
+.summary-grid dt {
+  color: var(--muted);
+}
+
+.summary-grid dd {
+  margin: 0;
+  word-break: break-all;
+}

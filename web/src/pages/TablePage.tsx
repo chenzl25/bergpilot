@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams, useSearchParams } from "react-router";
 
@@ -210,6 +210,7 @@ function SchemaTab({ detail }: { detail: TableDetail }) {
 }
 
 function SnapshotsTab({ detail }: { detail: TableDetail }) {
+  const [expanded, setExpanded] = useState<string | null>(null);
   const refsBySnapshot = new Map<string, string[]>();
   for (const ref of detail.refs) {
     refsBySnapshot.set(ref.snapshot_id, [...(refsBySnapshot.get(ref.snapshot_id) ?? []), ref.name]);
@@ -237,8 +238,14 @@ function SnapshotsTab({ detail }: { detail: TableDetail }) {
           const s = snapshot.summary;
           const added = Number(s["added-data-files"] ?? 0) + Number(s["added-delete-files"] ?? 0);
           const removed = Number(s["deleted-data-files"] ?? 0) + Number(s["removed-delete-files"] ?? 0);
+          const open = expanded === snapshot.snapshot_id;
           return (
-            <tr key={snapshot.snapshot_id}>
+            <Fragment key={snapshot.snapshot_id}>
+            <tr
+              className="clickable"
+              onClick={() => setExpanded(open ? null : snapshot.snapshot_id)}
+              title="Show the full summary"
+            >
               <td className="nowrap">{formatTime(snapshot.timestamp_ms)}</td>
               <td className="mono">
                 {snapshot.snapshot_id}
@@ -260,6 +267,27 @@ function SnapshotsTab({ detail }: { detail: TableDetail }) {
               <td className="right">{s["deleted-records"] ? formatNumber(s["deleted-records"]) : ""}</td>
               <td className="right">{formatNumber(s["total-records"])}</td>
             </tr>
+            {open && (
+              <tr className="detail-row">
+                <td colSpan={8}>
+                  <dl className="summary-grid">
+                    <dt>Snapshot</dt>
+                    <dd className="mono">{snapshot.snapshot_id}</dd>
+                    <dt>Parent</dt>
+                    <dd className="mono">{snapshot.parent_id ?? "—"}</dd>
+                    <dt>Sequence number</dt>
+                    <dd>{snapshot.sequence_number}</dd>
+                    {Object.entries(s).map(([key, value]) => (
+                      <Fragment key={key}>
+                        <dt>{key}</dt>
+                        <dd className="mono">{value}</dd>
+                      </Fragment>
+                    ))}
+                  </dl>
+                </td>
+              </tr>
+            )}
+            </Fragment>
           );
         })}
       </tbody>

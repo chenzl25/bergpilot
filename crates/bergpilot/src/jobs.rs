@@ -1,7 +1,8 @@
 //! Maintenance jobs and schedules.
 //!
 //! Jobs live in SQLite. A worker loop starts queued jobs, at most one per
-//! table and [`MAX_RUNNING`] overall, and records their outcome. A scheduler
+//! table and `MaintenanceLimits::max_running_jobs` overall, and records their
+//! outcome. A scheduler
 //! loop queues jobs for due schedules; it advances a schedule's next run
 //! before queueing, so a slow job is never queued twice for the same tick.
 
@@ -24,8 +25,6 @@ use crate::types::{
     JobInfo, JobOutcome, JobStatus, MaintenanceTask, ScheduleInfo, ScheduleInput, TableRef,
 };
 
-/// Jobs that may run at the same time.
-pub const MAX_RUNNING: usize = 2;
 const DISPATCH_INTERVAL: Duration = Duration::from_secs(2);
 const SCHEDULE_INTERVAL: Duration = Duration::from_secs(20);
 
@@ -215,7 +214,7 @@ impl Jobs {
                 job.target.table.clone(),
             );
             let mut running = self.running.lock().await;
-            if running.len() >= MAX_RUNNING {
+            if running.len() >= self.limits.max_running_jobs.max(1) {
                 break;
             }
             if running.values().any(|other| other.table == key) {

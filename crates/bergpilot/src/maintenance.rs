@@ -35,12 +35,15 @@ const MAX_REPORTED_FILES: usize = 500;
 pub struct MaintenanceLimits {
     /// DataFusion memory budget for one compaction before it spills.
     pub compaction_memory_bytes: usize,
+    /// Jobs that may run at the same time (at most one per table).
+    pub max_running_jobs: usize,
 }
 
 impl Default for MaintenanceLimits {
     fn default() -> Self {
         Self {
             compaction_memory_bytes: 2 * 1024 * 1024 * 1024,
+            max_running_jobs: 2,
         }
     }
 }

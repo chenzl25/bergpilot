@@ -38,16 +38,26 @@ impl AppState {
     /// State without background work; call [`AppState::start`] to run jobs
     /// and schedules.
     pub fn new(store: Store, token: Option<String>) -> Self {
+        Self::with_limits(
+            store,
+            token,
+            QueryLimits::default(),
+            MaintenanceLimits::default(),
+        )
+    }
+
+    pub fn with_limits(
+        store: Store,
+        token: Option<String>,
+        query_limits: QueryLimits,
+        maintenance_limits: MaintenanceLimits,
+    ) -> Self {
         let registry = CatalogRegistry::new(store.clone());
         Self {
-            jobs: Jobs::new(
-                store.pool().clone(),
-                registry.clone(),
-                MaintenanceLimits::default(),
-            ),
+            jobs: Jobs::new(store.pool().clone(), registry.clone(), maintenance_limits),
             registry,
             file_stats: FileStatsCache::default(),
-            query_limits: QueryLimits::default(),
+            query_limits,
             query_slots: Arc::new(Semaphore::new(QUERY_SLOTS)),
             token: token.map(Arc::from),
         }
