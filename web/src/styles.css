@@ -1148,3 +1148,38 @@ tr.clickable:hover td {
   margin: 0;
   word-break: break-all;
 }
+
+.attention-notice {
+  background: #fdf3e3;
+  color: #8a5a12;
+  margin: 0 0 16px;
+}
+
+.explorer-search {
+  padding: 0 10px 8px;
+}
+
+.explorer-search input {
+  height: 30px;
+  font-size: 13px;
+}
+
+.search-results {
+  border-bottom: 1px solid var(--border);
+  padding: 0 4px 8px;
+  margin-bottom: 8px;
+}
+
+.search-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  color: var(--text);
+}
+
+.search-result:hover {
+  background: var(--bg);
+  text-decoration: none;
+}

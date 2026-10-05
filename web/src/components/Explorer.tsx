@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link, NavLink, useLocation } from "react-router";
 
 import { api } from "../api/client";
@@ -31,6 +31,7 @@ import { errorMessage } from "./Layout";
 /** Catalog → namespace → table tree. Levels load when expanded. */
 export function Explorer() {
   const catalogs = useQuery({ queryKey: ["catalogs"], queryFn: api.listCatalogs });
+  const [search, setSearch] = useState("");
 
   return (
     <div className="explorer">
@@ -40,6 +41,20 @@ export function Explorer() {
           + Add
         </Link>
       </div>
+      {(catalogs.data?.length ?? 0) > 0 && (
+        <div className="explorer-search">
+          <input
+            type="search"
+            value={search}
+            placeholder="Find a table"
+            onChange={(event) => setSearch(event.target.value)}
+            onKeyDown={(event) => event.key === "Escape" && setSearch("")}
+          />
+        </div>
+      )}
+      {search.trim() && catalogs.data && (
+        <SearchResults catalogs={catalogs.data} term={search.trim().toLowerCase()} onPick={() => setSearch("")} />
+      )}
       {catalogs.isPending && <p className="muted pad">Loading…</p>}
       {catalogs.isError && <p className="error pad">{errorMessage(catalogs.error)}</p>}
       {catalogs.data?.length === 0 && <p className="muted pad">No catalogs yet.</p>}
@@ -48,6 +63,52 @@ export function Explorer() {
           <CatalogNode key={catalog.id} catalog={catalog} />
         ))}
       </ul>
+    </div>
+  );
+}
+
+const MAX_RESULTS = 30;
+
+/** Table names matching `term` across catalogs, from the names API. */
+function SearchResults(props: { catalogs: CatalogSummary[]; term: string; onPick: () => void }) {
+  const names = useQueries({
+    queries: props.catalogs.map((catalog) => ({
+      queryKey: ["names", catalog.id],
+      queryFn: () => api.names(catalog.id),
+      staleTime: 5 * 60_000,
+      retry: false,
+    })),
+  });
+  const matches: { catalog: CatalogSummary; namespace: string[]; table: string }[] = [];
+  props.catalogs.forEach((catalog, index) => {
+    for (const entry of names[index]?.data?.namespaces ?? []) {
+      for (const table of entry.tables) {
+        const full = `${entry.namespace.join(".")}.${table}`.toLowerCase();
+        if (full.includes(props.term)) matches.push({ catalog, namespace: entry.namespace, table });
+      }
+    }
+  });
+  const loading = names.some((result) => result.isPending);
+  return (
+    <div className="search-results">
+      {matches.slice(0, MAX_RESULTS).map((match) => (
+        <Link
+          key={`${match.catalog.id}/${match.namespace.join("\u001f")}/${match.table}`}
+          className="search-result"
+          to={tablePath(match.catalog.id, match.namespace, match.table)}
+          onClick={props.onPick}
+        >
+          <span className="tree-icon table-icon" />
+          <span>
+            {match.table}
+            <span className="muted small"> {match.catalog.name}.{match.namespace.join(".")}</span>
+          </span>
+        </Link>
+      ))}
+      {matches.length === 0 && <p className="muted tree-note">{loading ? "Searching…" : "No tables match."}</p>}
+      {matches.length > MAX_RESULTS && (
+        <p className="muted tree-note">{matches.length - MAX_RESULTS} more; type more of the name.</p>
+      )}
     </div>
   );
 }

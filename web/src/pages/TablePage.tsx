@@ -8,6 +8,7 @@ import type { TableDetail } from "../api/generated/TableDetail";
 import { errorMessage } from "../components/Layout";
 import { MaintenanceTab } from "../components/MaintenanceTab";
 import { TrendChart } from "../components/TrendChart";
+import { attention } from "../health";
 import { Results } from "./SqlPage";
 import { formatAge, formatBytes, formatNumber, formatTime, namespacePath, sqlTableName } from "../format";
 
@@ -89,8 +90,20 @@ export function TablePage() {
 function Overview({ detail }: { detail: TableDetail }) {
   const current = detail.snapshots.find((s) => s.snapshot_id === detail.current_snapshot_id);
   const summary = current?.summary ?? {};
+  const notes = attention({
+    data_files: Number(summary["total-data-files"] ?? 0),
+    data_bytes: Number(summary["total-files-size"] ?? 0),
+    delete_files: Number(summary["total-delete-files"] ?? 0),
+    snapshots: detail.snapshots.length,
+  });
   return (
     <div className="overview">
+      {notes.length > 0 && (
+        <div className="notice attention-notice">
+          Worth a look: {notes.join(", ")}.{" "}
+          <Link to="?tab=maintenance">Maintenance</Link>
+        </div>
+      )}
       <div className="stats">
         <Stat label="Records" value={formatNumber(summary["total-records"])} />
         <Stat label="Data files" value={formatNumber(summary["total-data-files"])} />

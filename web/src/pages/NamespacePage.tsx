@@ -5,6 +5,7 @@ import { Link, useParams } from "react-router";
 import { api } from "../api/client";
 import type { TableSummary } from "../api/generated/TableSummary";
 import { errorMessage } from "../components/Layout";
+import { attention } from "../health";
 import {
   formatAge,
   formatBytes,
@@ -15,19 +16,7 @@ import {
   tablePath,
 } from "../format";
 
-const SMALL_FILE_BYTES = 32 * 1024 * 1024;
-
 type SortKey = "name" | "records" | "data_bytes" | "data_files" | "avg" | "delete_files" | "snapshots" | "updated";
-
-/** Facts worth a look, phrased as observations. */
-function attention(table: TableSummary): string[] {
-  const notes: string[] = [];
-  const files = table.data_files ?? 0;
-  if (files >= 16 && (table.data_bytes ?? 0) / files < SMALL_FILE_BYTES) notes.push("small files");
-  if ((table.delete_files ?? 0) > 0) notes.push(`${formatNumber(table.delete_files)} delete files`);
-  if (table.snapshots > 100) notes.push(`${formatNumber(table.snapshots)} snapshots`);
-  return notes;
-}
 
 function value(table: TableSummary, key: SortKey): number | string {
   switch (key) {
