@@ -91,14 +91,27 @@ pub fn redact(message: &str, record: &CatalogRecord) -> String {
         // Very short values would mangle unrelated text and reveal little.
         if secret.len() >= 4 {
             redacted = redacted.replace(secret.as_str(), "***");
-            let encoded =
-                url::form_urlencoded::byte_serialize(secret.as_bytes()).collect::<String>();
-            if encoded != *secret {
-                redacted = redacted.replace(&encoded, "***");
+            for encoded in encodings(secret) {
+                if encoded != *secret {
+                    redacted = redacted.replace(&encoded, "***");
+                }
             }
         }
     }
     redacted
+}
+
+/// How a secret can appear in text besides itself: as a URL password and
+/// form-encoded.
+fn encodings(secret: &str) -> Vec<String> {
+    let mut out = vec![url::form_urlencoded::byte_serialize(secret.as_bytes()).collect()];
+    if let Ok(mut url) = url::Url::parse("postgres://user@host")
+        && url.set_password(Some(secret)).is_ok()
+        && let Some(password) = url.password()
+    {
+        out.push(password.to_owned());
+    }
+    out
 }
 
 /// Adapt BergPilot's SQL catalog settings to the iceberg-rust builder:
@@ -233,10 +246,13 @@ mod tests {
             created_at: String::new(),
             updated_at: String::new(),
         };
-        let message = "cannot reach postgres://iceberg:p%40ss+word@db/catalog (p@ss word)";
+        let message = "cannot reach postgres://iceberg:p%40ss%20word@db/catalog (p@ss word)";
         assert_eq!(
             redact(message, &record),
             "cannot reach postgres://iceberg:***@db/catalog (***)"
         );
+        assert_eq!(redact("form p%40ss+word", &record), "form ***");
+        // Too short to redact safely.
+        assert_eq!(redact("abc", &record), "abc");
     }
 }
