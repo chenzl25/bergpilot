@@ -5,6 +5,12 @@ import type { CatalogInput } from "./generated/CatalogInput";
 import type { CatalogSummary } from "./generated/CatalogSummary";
 import type { CatalogTestResult } from "./generated/CatalogTestResult";
 import type { FileStats } from "./generated/FileStats";
+import type { JobInfo } from "./generated/JobInfo";
+import type { MaintenancePreview } from "./generated/MaintenancePreview";
+import type { MaintenanceTask } from "./generated/MaintenanceTask";
+import type { ScheduleInfo } from "./generated/ScheduleInfo";
+import type { ScheduleInput } from "./generated/ScheduleInput";
+import type { TableRef } from "./generated/TableRef";
 import type { NamespaceList } from "./generated/NamespaceList";
 import type { QueryResult } from "./generated/QueryResult";
 import type { ServerInfo } from "./generated/ServerInfo";
@@ -80,6 +86,10 @@ export function encodeNamespace(levels: string[]): string {
   return encodeURIComponent(levels.join("\u001f"));
 }
 
+function tableQuery(target: TableRef): string {
+  return `catalog_id=${target.catalog_id}&namespace=${encodeNamespace(target.namespace)}&table=${encodeURIComponent(target.table)}`;
+}
+
 export const api = {
   info: () => request<ServerInfo>("/info"),
 
@@ -111,6 +121,25 @@ export const api = {
       `/catalogs/${id}/table/files?namespace=${encodeNamespace(namespace)}&name=${encodeURIComponent(name)}` +
         (snapshotId ? `&snapshot_id=${snapshotId}` : ""),
     ),
+
+  jobs: (target?: TableRef, limit = 100) =>
+    request<JobInfo[]>(`/jobs?limit=${limit}${target ? `&${tableQuery(target)}` : ""}`),
+  job: (id: number) => request<JobInfo>(`/jobs/${id}`),
+  submitJob: (target: TableRef, task: MaintenanceTask) =>
+    request<JobInfo>("/jobs", { method: "POST", body: JSON.stringify({ ...target, task }) }),
+  cancelJob: (id: number) => request<JobInfo>(`/jobs/${id}/cancel`, { method: "POST" }),
+  preview: (target: TableRef, task: MaintenanceTask) =>
+    request<MaintenancePreview>("/maintenance/preview", {
+      method: "POST",
+      body: JSON.stringify({ ...target, task }),
+    }),
+  schedules: (target?: TableRef) =>
+    request<ScheduleInfo[]>(`/schedules${target ? `?${tableQuery(target)}` : ""}`),
+  createSchedule: (input: ScheduleInput) =>
+    request<ScheduleInfo>("/schedules", { method: "POST", body: JSON.stringify(input) }),
+  updateSchedule: (id: number, input: ScheduleInput) =>
+    request<ScheduleInfo>(`/schedules/${id}`, { method: "PUT", body: JSON.stringify(input) }),
+  deleteSchedule: (id: number) => request<void>(`/schedules/${id}`, { method: "DELETE" }),
 
   query: (sql: string, limit?: number) =>
     request<QueryResult>("/query", { method: "POST", body: JSON.stringify({ sql, limit }) }),

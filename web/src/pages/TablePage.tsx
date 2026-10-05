@@ -6,15 +6,17 @@ import { api } from "../api/client";
 import type { FileStats } from "../api/generated/FileStats";
 import type { TableDetail } from "../api/generated/TableDetail";
 import { errorMessage } from "../components/Layout";
+import { MaintenanceTab } from "../components/MaintenanceTab";
 import { formatAge, formatBytes, formatNumber, formatTime, sqlTableName } from "../format";
 
-const TABS = ["overview", "schema", "snapshots", "files"] as const;
+const TABS = ["overview", "schema", "snapshots", "files", "maintenance"] as const;
 type Tab = (typeof TABS)[number];
 const TAB_LABELS: Record<Tab, string> = {
   overview: "Overview",
   schema: "Schema",
   snapshots: "Snapshots",
   files: "Files",
+  maintenance: "Maintenance",
 };
 
 export function TablePage() {
@@ -67,6 +69,9 @@ export function TablePage() {
       {tab === "schema" && <SchemaTab detail={detail} />}
       {tab === "snapshots" && <SnapshotsTab detail={detail} />}
       {tab === "files" && <FilesTab detail={detail} catalogId={catalogId} namespace={namespace} />}
+      {tab === "maintenance" && (
+        <MaintenanceTab target={{ catalog_id: catalogId, namespace, table: name }} detail={detail} />
+      )}
     </div>
   );
 }

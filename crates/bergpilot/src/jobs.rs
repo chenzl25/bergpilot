@@ -472,9 +472,11 @@ fn parse_cron(cron: &str) -> ApiResult<Cron> {
         .map_err(|error| ApiError::BadRequest(format!("invalid schedule {cron:?}: {error}")))
 }
 
+/// croner's description of `cron` without its closing period, e.g.
+/// "At 02:00".
 pub fn describe_cron(cron: &str) -> String {
     parse_cron(cron)
-        .map(|parsed| parsed.describe())
+        .map(|parsed| parsed.describe().trim_end_matches('.').to_owned())
         .unwrap_or_default()
 }
 
@@ -543,7 +545,11 @@ mod tests {
         assert!(next_run_ms("*/15 * * * *").unwrap() > Utc::now().timestamp_millis());
         assert!(next_run_ms("0 0 2 * * *").is_err());
         assert!(next_run_ms("every day").is_err());
-        assert!(!describe_cron("0 2 * * *").is_empty());
+        let description = describe_cron("0 2 * * *");
+        assert!(
+            !description.is_empty() && !description.ends_with('.'),
+            "{description}"
+        );
     }
 
     #[test]

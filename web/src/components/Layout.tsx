@@ -32,6 +32,7 @@ export function Layout() {
             Catalogs
           </NavLink>
           <NavLink to="/sql">SQL</NavLink>
+          <NavLink to="/jobs">Jobs</NavLink>
         </nav>
         <span className="version">{info.data ? `v${info.data.version}` : ""}</span>
       </header>

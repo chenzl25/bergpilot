@@ -7,6 +7,7 @@ import { ApiError, consumeTokenFromUrl } from "./api/client";
 import { Layout } from "./components/Layout";
 import { CatalogFormPage } from "./pages/CatalogForm";
 import { HomePage } from "./pages/Home";
+import { JobsPage } from "./pages/JobsPage";
 import { NotFoundPage } from "./pages/NotFound";
 import { SqlPage } from "./pages/SqlPage";
 import { TablePage } from "./pages/TablePage";
@@ -35,6 +36,7 @@ const router = createBrowserRouter([
       { path: "/catalogs/:id/edit", element: <CatalogFormPage /> },
       { path: "/catalogs/:id/tables/*", element: <TablePage /> },
       { path: "/sql", element: <SqlPage /> },
+      { path: "/jobs", element: <JobsPage /> },
       { path: "*", element: <NotFoundPage /> },
     ],
   },
