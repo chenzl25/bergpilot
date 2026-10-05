@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
 import CodeMirror, { keymap, Prec } from "@uiw/react-codemirror";
 import { sql as sqlLanguage } from "@codemirror/lang-sql";
 import { useSearchParams } from "react-router";
 
 import { api } from "../api/client";
+import type { CatalogNames } from "../api/generated/CatalogNames";
 import type { QueryResult } from "../api/generated/QueryResult";
 import { errorMessage } from "../components/Layout";
 import { formatNumber } from "../format";
@@ -33,6 +34,32 @@ const DEFAULT_SQL = `-- Tables are named catalog.namespace.table.
 -- or "table@<branch or tag>".
 SELECT 1 AS ok`;
 
+type SqlSchema = { [name: string]: SqlSchema | readonly string[] };
+
+const PLAIN_IDENTIFIER = /^[a-z_][a-z0-9_]*$/;
+const quoteIdentifier = (name: string) =>
+  PLAIN_IDENTIFIER.test(name) ? name : `"${name.replace(/"/g, '""')}"`;
+
+/**
+ * catalog → namespace → table, the shape @codemirror/lang-sql completes.
+ * lang-sql reads a dot in a key as nesting, so multi-level namespaces (one
+ * quoted identifier with dots in SQL) are left out of completion.
+ */
+function completionSchema(catalogs: { name: string; names?: CatalogNames }[]): SqlSchema {
+  const schema: SqlSchema = {};
+  for (const catalog of catalogs) {
+    const namespaces: SqlSchema = {};
+    for (const entry of catalog.names?.namespaces ?? []) {
+      if (entry.namespace.length !== 1 || entry.namespace[0].includes(".")) continue;
+      const tables: SqlSchema = {};
+      for (const table of entry.tables) tables[quoteIdentifier(table)] = [];
+      namespaces[quoteIdentifier(entry.namespace[0])] = tables;
+    }
+    schema[catalog.name] = namespaces;
+  }
+  return schema;
+}
+
 export function SqlPage() {
   const [search, setSearch] = useSearchParams();
   const [text, setText] = useState(() => localStorage.getItem(STORAGE_KEY) ?? DEFAULT_SQL);
@@ -59,9 +86,29 @@ export function SqlPage() {
     if (text.trim() && !run.isPending) run.mutate(text);
   }, [run, text]);
 
+  const catalogs = useQuery({ queryKey: ["catalogs"], queryFn: api.listCatalogs });
+  const names = useQueries({
+    queries: (catalogs.data ?? []).map((catalog) => ({
+      queryKey: ["names", catalog.id],
+      queryFn: () => api.names(catalog.id),
+      staleTime: 5 * 60_000,
+      retry: false,
+    })),
+  });
+  const namesKey = names.map((result) => result.dataUpdatedAt).join(",");
+  const schema = useMemo(
+    () =>
+      completionSchema(
+        (catalogs.data ?? []).map((catalog, index) => ({ name: catalog.name, names: names[index]?.data })),
+      ),
+    // `names` is a new array every render; its update times say when data changed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [catalogs.data, namesKey],
+  );
+
   const extensions = useMemo(
     () => [
-      sqlLanguage(),
+      sqlLanguage({ schema }),
       Prec.highest(
         keymap.of([
           {
@@ -74,7 +121,7 @@ export function SqlPage() {
         ]),
       ),
     ],
-    [execute],
+    [execute, schema],
   );
 
   return (

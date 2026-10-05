@@ -612,3 +612,19 @@ pub struct NamespaceDetail {
     /// True when only the first tables were summarized.
     pub truncated: bool,
 }
+
+/// Namespaces and table names of a catalog, for SQL completion.
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CatalogNames {
+    pub namespaces: Vec<NamespaceNames>,
+    /// True when the walk stopped early (very large catalogs).
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct NamespaceNames {
+    pub namespace: Vec<String>,
+    pub tables: Vec<String>,
+}

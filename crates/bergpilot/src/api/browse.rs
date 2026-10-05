@@ -8,7 +8,8 @@ use crate::error::{ApiError, ApiResult};
 use crate::metadata::table_detail;
 use crate::server::AppState;
 use crate::types::{
-    FileStats, NamespaceDetail, NamespaceList, TableDetail, TableList, TableSummary,
+    CatalogNames, FileStats, NamespaceDetail, NamespaceList, NamespaceNames, TableDetail,
+    TableList, TableSummary,
 };
 
 /// Tables summarized per namespace page.
@@ -190,6 +191,70 @@ fn summarize(name: String, table: &iceberg::table::Table) -> TableSummary {
         last_updated_ms: Some(metadata.last_updated_ms()),
         error: None,
     }
+}
+
+/// Namespaces walked for completion, and how deep.
+const NAMES_LIMIT: usize = 300;
+const NAMES_DEPTH: usize = 4;
+
+/// Every namespace (breadth first, up to a limit) with its table names.
+pub async fn names(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<CatalogNames>> {
+    use futures::{StreamExt, TryStreamExt};
+
+    let connected = state.registry.get(id).await?;
+    let catalog = connected.catalog;
+    let mut out = Vec::new();
+    let mut frontier = catalog.list_namespaces(None).await?;
+    let mut truncated = false;
+    for depth in 0..NAMES_DEPTH {
+        if frontier.is_empty() {
+            break;
+        }
+        if out.len() + frontier.len() > NAMES_LIMIT {
+            frontier.truncate(NAMES_LIMIT.saturating_sub(out.len()));
+            truncated = true;
+        }
+        let level: Vec<(NamespaceIdent, Vec<String>, Vec<NamespaceIdent>)> =
+            futures::stream::iter(frontier)
+                .map(|namespace| {
+                    let catalog = catalog.clone();
+                    let descend = depth + 1 < NAMES_DEPTH;
+                    async move {
+                        let tables = catalog.list_tables(&namespace).await?;
+                        let children = if descend {
+                            catalog.list_namespaces(Some(&namespace)).await?
+                        } else {
+                            Vec::new()
+                        };
+                        let mut tables: Vec<String> =
+                            tables.into_iter().map(|t| t.name().to_owned()).collect();
+                        tables.sort();
+                        Ok::<_, iceberg::Error>((namespace, tables, children))
+                    }
+                })
+                .buffer_unordered(SUMMARY_CONCURRENCY)
+                .try_collect()
+                .await?;
+        frontier = Vec::new();
+        for (namespace, tables, children) in level {
+            out.push(NamespaceNames {
+                namespace: namespace.inner(),
+                tables,
+            });
+            frontier.extend(children);
+        }
+        if truncated {
+            break;
+        }
+    }
+    out.sort_by(|a, b| a.namespace.cmp(&b.namespace));
+    Ok(Json(CatalogNames {
+        namespaces: out,
+        truncated: truncated || !frontier.is_empty(),
+    }))
 }
 
 pub async fn partitions(

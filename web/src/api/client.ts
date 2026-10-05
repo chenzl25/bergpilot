@@ -2,6 +2,7 @@
 // ts-rs (src/api/generated); do not edit those files by hand.
 
 import type { CatalogInput } from "./generated/CatalogInput";
+import type { CatalogNames } from "./generated/CatalogNames";
 import type { CatalogSummary } from "./generated/CatalogSummary";
 import type { CatalogTestResult } from "./generated/CatalogTestResult";
 import type { FileStats } from "./generated/FileStats";
@@ -112,6 +113,7 @@ export const api = {
     request<NamespaceList>(
       `/catalogs/${id}/namespaces${parent?.length ? `?parent=${encodeNamespace(parent)}` : ""}`,
     ),
+  names: (id: number) => request<CatalogNames>(`/catalogs/${id}/names`),
   namespace: (id: number, namespace: string[]) =>
     request<NamespaceDetail>(`/catalogs/${id}/namespace?namespace=${encodeNamespace(namespace)}`),
   tables: (id: number, namespace: string[]) =>

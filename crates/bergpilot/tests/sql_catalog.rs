@@ -104,6 +104,12 @@ async fn browses_and_queries_a_sql_catalog() {
     assert_eq!(ns["tables"][0]["data_files"], 4);
     assert_eq!(ns["tables"][0]["snapshots"], 2);
 
+    let (_, names) = call(&router, "GET", &format!("/api/catalogs/{id}/names"), None).await;
+    assert_eq!(
+        names,
+        json!({ "namespaces": [{ "namespace": ["sales"], "tables": ["orders"] }], "truncated": false })
+    );
+
     // Time travel: the first snapshot had three rows.
     let (_, first) = call(
         &router,
