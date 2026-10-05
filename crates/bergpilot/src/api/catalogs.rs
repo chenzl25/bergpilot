@@ -13,6 +13,7 @@ pub async fn info(State(state): State<AppState>) -> Json<ServerInfo> {
     Json(ServerInfo {
         version: env!("CARGO_PKG_VERSION").to_owned(),
         auth_required: state.token.is_some(),
+        catalog_kinds: crate::catalogs::compiled_kinds(),
     })
 }
 

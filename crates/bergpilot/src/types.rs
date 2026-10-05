@@ -17,21 +17,36 @@ use ts_rs::TS;
 #[serde(rename_all = "lowercase")]
 #[ts(export)]
 pub enum CatalogKind {
+    /// Iceberg REST catalog.
     Rest,
+    /// AWS Glue Data Catalog.
+    Glue,
+    /// Amazon S3 Tables.
+    S3tables,
+    /// A database catalog in the Java `JdbcCatalog` layout (PostgreSQL,
+    /// MySQL or SQLite).
+    Sql,
 }
 
 impl CatalogKind {
+    pub const ALL: [CatalogKind; 4] = [
+        CatalogKind::Rest,
+        CatalogKind::Glue,
+        CatalogKind::S3tables,
+        CatalogKind::Sql,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             CatalogKind::Rest => "rest",
+            CatalogKind::Glue => "glue",
+            CatalogKind::S3tables => "s3tables",
+            CatalogKind::Sql => "sql",
         }
     }
 
     pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "rest" => Some(CatalogKind::Rest),
-            _ => None,
-        }
+        Self::ALL.into_iter().find(|kind| kind.as_str() == value)
     }
 }
 
@@ -278,4 +293,6 @@ pub struct ServerInfo {
     pub version: String,
     /// Whether API requests must carry the access token.
     pub auth_required: bool,
+    /// Catalog types compiled into this build.
+    pub catalog_kinds: Vec<CatalogKind>,
 }

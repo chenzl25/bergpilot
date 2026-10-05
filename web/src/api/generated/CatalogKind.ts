@@ -3,4 +3,4 @@
 /**
  * Catalog implementations BergPilot can connect to.
  */
-export type CatalogKind = "rest";
+export type CatalogKind = "rest" | "glue" | "s3tables" | "sql";

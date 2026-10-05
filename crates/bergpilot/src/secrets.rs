@@ -116,6 +116,7 @@ pub fn is_secret_key(key: &str) -> bool {
         "credential",
         "session",
         "access-key",
+        "access_key",
         "private",
         "authorization",
     ];
@@ -160,6 +161,10 @@ mod tests {
             "s3.session-token",
             "header.Authorization",
             "gcs.credentials-json",
+            "aws_access_key_id",
+            "aws_secret_access_key",
+            "aws_session_token",
+            "password",
         ] {
             assert!(is_secret_key(key), "{key} should be secret");
         }

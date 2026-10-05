@@ -1,40 +1,109 @@
-//! Fill the local development catalog (`dev/docker-compose.yml`) with sample
-//! tables. Safe to re-run: existing tables get more snapshots.
+//! Fill a development catalog with sample tables. Safe to re-run: existing
+//! tables get more snapshots.
 //!
 //!     cargo run --example seed
 //!
 //! Creates `demo.events` (partitioned by category, several small appends),
 //! `demo.users`, and `demo.archive.orders` in a nested namespace.
+//!
+//! By default it seeds the REST catalog from `dev/docker-compose.yml`. Other
+//! catalogs are chosen with environment variables:
+//!
+//! - `SEED_KIND`: `rest` (default), `glue` or `s3tables`
+//! - `SEED_ENDPOINT`: catalog endpoint (REST URI; Glue or S3 Tables API
+//!   endpoint, e.g. a moto server)
+//! - `SEED_WAREHOUSE`: Glue warehouse, e.g. `s3://bucket/warehouse`
+//! - `SEED_TABLE_BUCKET_ARN`: S3 Tables bucket ARN
+//! - `SEED_S3_ENDPOINT`, `SEED_ACCESS_KEY`, `SEED_SECRET_KEY`: storage
+//!   (defaults: the dev compose storage)
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
+use bergpilot::store::CatalogRecord;
+use bergpilot::types::CatalogKind;
 use iceberg::spec::{NestedField, PrimitiveType, Schema, Transform, Type, UnboundPartitionSpec};
-use iceberg::{Catalog, CatalogBuilder, NamespaceIdent, TableCreation, TableIdent};
-use iceberg_catalog_rest::RestCatalogBuilder;
+use iceberg::{Catalog, NamespaceIdent, TableCreation, TableIdent};
 use iceberg_datafusion::IcebergCatalogProvider;
-use iceberg_storage_opendal::OpenDalResolvingStorageFactory;
+
+fn env(key: &str, default: &str) -> String {
+    std::env::var(key).unwrap_or_else(|_| default.to_owned())
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let props = HashMap::from([
-        ("uri".to_owned(), "http://localhost:8181".to_owned()),
-        ("s3.endpoint".to_owned(), "http://localhost:9000".to_owned()),
-        ("s3.access-key-id".to_owned(), "admin".to_owned()),
-        ("s3.secret-access-key".to_owned(), "password".to_owned()),
+    let kind = CatalogKind::parse(&env("SEED_KIND", "rest"))
+        .ok_or_else(|| anyhow::anyhow!("SEED_KIND must be rest, glue or s3tables"))?;
+    let access_key = env("SEED_ACCESS_KEY", "admin");
+    let secret_key = env("SEED_SECRET_KEY", "password");
+    let mut properties = BTreeMap::from([
+        (
+            "s3.endpoint".to_owned(),
+            env("SEED_S3_ENDPOINT", "http://localhost:9000"),
+        ),
         ("s3.region".to_owned(), "us-east-1".to_owned()),
         ("s3.path-style-access".to_owned(), "true".to_owned()),
+        ("s3.access-key-id".to_owned(), access_key.clone()),
+        ("s3.secret-access-key".to_owned(), secret_key.clone()),
     ]);
-    let catalog: Arc<dyn Catalog> = Arc::new(
-        RestCatalogBuilder::default()
-            .with_storage_factory(Arc::new(OpenDalResolvingStorageFactory::new()))
-            .load("dev", props)
-            .await?,
-    );
+    match kind {
+        CatalogKind::Rest => {
+            properties.insert(
+                "uri".to_owned(),
+                env("SEED_ENDPOINT", "http://localhost:8181"),
+            );
+        }
+        CatalogKind::Glue | CatalogKind::S3tables => {
+            let endpoint_key = if kind == CatalogKind::Glue {
+                "uri"
+            } else {
+                "endpoint_url"
+            };
+            properties.insert(
+                endpoint_key.to_owned(),
+                env("SEED_ENDPOINT", "http://localhost:5050"),
+            );
+            properties.insert("region_name".to_owned(), "us-east-1".to_owned());
+            properties.insert("aws_access_key_id".to_owned(), access_key);
+            properties.insert("aws_secret_access_key".to_owned(), secret_key);
+            if kind == CatalogKind::Glue {
+                properties.insert(
+                    "warehouse".to_owned(),
+                    env("SEED_WAREHOUSE", "s3://warehouse/glue"),
+                );
+            } else {
+                properties.insert(
+                    "table_bucket_arn".to_owned(),
+                    std::env::var("SEED_TABLE_BUCKET_ARN")
+                        .map_err(|_| anyhow::anyhow!("set SEED_TABLE_BUCKET_ARN"))?,
+                );
+            }
+        }
+        CatalogKind::Sql => anyhow::bail!("seed SQL catalogs through a REST server instead"),
+    }
+    let record = CatalogRecord {
+        id: 0,
+        name: "dev".to_owned(),
+        kind,
+        properties,
+        secrets: BTreeMap::new(),
+        created_at: String::new(),
+        updated_at: String::new(),
+    };
+    let catalog: Arc<dyn Catalog> = bergpilot::catalogs::connect(&record)
+        .await
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
 
     let demo = NamespaceIdent::new("demo".to_owned());
     let archive = NamespaceIdent::from_strs(["demo", "archive"])?;
-    for namespace in [&demo, &archive] {
+    // Glue and S3 Tables have no nested namespaces.
+    let nested = kind == CatalogKind::Rest;
+    let namespaces = if nested {
+        vec![&demo, &archive]
+    } else {
+        vec![&demo]
+    };
+    for namespace in namespaces {
         if !catalog.namespace_exists(namespace).await? {
             catalog.create_namespace(namespace, HashMap::new()).await?;
         }
@@ -71,7 +140,9 @@ async fn main() -> anyhow::Result<()> {
             NestedField::optional(3, "amount", Type::Primitive(PrimitiveType::Double)).into(),
         ])
         .build()?;
-    create_if_missing(&*catalog, &archive, "orders", orders, None).await?;
+    if nested {
+        create_if_missing(&*catalog, &archive, "orders", orders, None).await?;
+    }
 
     let ctx = datafusion::prelude::SessionContext::new();
     ctx.register_catalog(

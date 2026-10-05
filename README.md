@@ -2,7 +2,7 @@
 
 Observability and maintenance for Apache Iceberg™ tables, in a single Rust service. No JVM, no Spark.
 
-> **Status:** early. Milestone 1 works: connect REST catalogs, browse namespaces and tables, inspect schemas, snapshots and file sizes, and run read-only SQL.
+> **Status:** early. Connect REST, AWS Glue, S3 Tables and JDBC catalogs, browse namespaces and tables, inspect schemas, snapshots and file sizes, and run read-only SQL.
 
 ## Goals
 
@@ -23,8 +23,17 @@ BergPilot is inspired by [Nimtable](https://github.com/nimtable/nimtable) and ma
 ## Roadmap
 
 1. **Read-only (done):** REST catalogs, browsing, table detail, file-size distribution, `SELECT` queries.
-2. **More catalogs:** AWS Glue, S3 Tables and JDBC.
+2. **More catalogs (done):** AWS Glue, S3 Tables and JDBC.
 3. **Maintenance:** compaction, snapshot expiry, orphan cleanup and manifest rewrites, with scheduling.
+
+## Catalogs
+
+| Type | Connects with | Notes |
+| --- | --- | --- |
+| REST | URI, optional OAuth2 client credentials or bearer token | Vended credentials are refreshed automatically. |
+| AWS Glue | Warehouse, region, default credential chain, profile or access keys | Glue databases are namespaces; Glue has no nesting. |
+| S3 Tables | Table bucket ARN, region, AWS credentials | Not yet tested against AWS; local mocks cover listing only. |
+| JDBC | PostgreSQL, MySQL or SQLite URL; password kept separately | Reads catalogs created by Java's `JdbcCatalog` (Spark, Flink, Trino). Set "catalog name in the database" to the name they used. |
 
 ## Running
 
@@ -57,6 +66,9 @@ pnpm --dir web dev                               # UI with hot reload on :5173
 
 For the local catalog use URI `http://localhost:8181`, S3 endpoint `http://localhost:9000`,
 region `us-east-1`, access key `admin`, secret `password`, and path-style access.
+
+To seed other catalog types (for example Glue in a [moto](https://github.com/getmoto/moto) server),
+see the environment variables at the top of `crates/bergpilot/examples/seed.rs`.
 
 `cargo test` regenerates the TypeScript API types in `web/src/api/generated`; commit them with any
 change to `crates/bergpilot/src/types.rs`.

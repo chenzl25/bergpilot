@@ -231,11 +231,34 @@ fn split_input(
     for key in secrets.keys() {
         properties.remove(key);
     }
+    let required = |key: &str, what: &str| {
+        if properties.get(key).is_none_or(|value| value.is_empty()) {
+            Err(ApiError::BadRequest(format!(
+                "a {} catalog needs {what} (property \"{key}\")",
+                input.kind.as_str()
+            )))
+        } else {
+            Ok(())
+        }
+    };
     match input.kind {
-        CatalogKind::Rest => {
-            if properties.get("uri").is_none_or(|uri| uri.is_empty()) {
+        CatalogKind::Rest => required("uri", "the catalog URI")?,
+        CatalogKind::Glue => required("warehouse", "a warehouse location")?,
+        CatalogKind::S3tables => required("table_bucket_arn", "the table bucket ARN")?,
+        CatalogKind::Sql => {
+            required("uri", "the database URL")?;
+            let uri = &properties["uri"];
+            let scheme_ok = ["postgres://", "postgresql://", "mysql://", "sqlite:"]
+                .iter()
+                .any(|prefix| uri.starts_with(prefix));
+            if !scheme_ok {
                 return Err(ApiError::BadRequest(
-                    "a REST catalog needs the \"uri\" property".to_owned(),
+                    "the database URL must start with postgres://, mysql:// or sqlite:".to_owned(),
+                ));
+            }
+            if url::Url::parse(uri).is_ok_and(|url| url.password().is_some()) {
+                return Err(ApiError::BadRequest(
+                    "put the database password in the password field, not in the URL".to_owned(),
                 ));
             }
         }

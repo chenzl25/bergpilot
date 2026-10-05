@@ -13,7 +13,10 @@ publish = false
 [workspace.dependencies]
 # The RisingWave fork of iceberg-rust, pinned to the revision iceberg-compaction uses.
 iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "edc64dc1975eb05a8b795f920980d9bee206eb61" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "edc64dc1975eb05a8b795f920980d9bee206eb61" }
 iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "edc64dc1975eb05a8b795f920980d9bee206eb61" }
+iceberg-catalog-s3tables = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "edc64dc1975eb05a8b795f920980d9bee206eb61" }
+iceberg-catalog-sql = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "edc64dc1975eb05a8b795f920980d9bee206eb61" }
 iceberg-datafusion = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "edc64dc1975eb05a8b795f920980d9bee206eb61" }
 iceberg-storage-opendal = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "edc64dc1975eb05a8b795f920980d9bee206eb61", default-features = false, features = ["opendal-fs", "opendal-memory", "opendal-s3"] }
 # Must match the DataFusion version the fork is built against.

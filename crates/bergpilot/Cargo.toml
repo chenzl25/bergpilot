@@ -8,6 +8,14 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+default = ["glue", "s3tables", "sql"]
+# Catalog types beyond REST. All are on by default; turning them off only
+# shortens builds.
+glue = ["dep:iceberg-catalog-glue"]
+s3tables = ["dep:iceberg-catalog-s3tables"]
+sql = ["dep:iceberg-catalog-sql", "sqlx/postgres", "sqlx/mysql", "sqlx/any"]
+
 [dependencies]
 aes-gcm = "0.10"
 anyhow = "1"
@@ -17,7 +25,10 @@ clap = { version = "4", features = ["derive", "env"] }
 datafusion = { workspace = true }
 futures = "0.3"
 iceberg = { workspace = true }
+iceberg-catalog-glue = { workspace = true, optional = true }
 iceberg-catalog-rest = { workspace = true }
+iceberg-catalog-s3tables = { workspace = true, optional = true }
+iceberg-catalog-sql = { workspace = true, optional = true }
 iceberg-datafusion = { workspace = true }
 iceberg-storage-opendal = { workspace = true }
 lru = "0.16"
@@ -32,7 +43,10 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "fs"
 tower-http = { version = "0.6", features = ["trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
 ts-rs = { version = "11", features = ["serde-json-impl"] }
 
 [dev-dependencies]
+http-body-util = "0.1"
 tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
