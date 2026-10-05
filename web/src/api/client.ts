@@ -32,6 +32,19 @@ export function setToken(token: string | null) {
   else localStorage.removeItem(TOKEN_KEY);
 }
 
+/**
+ * Move `?token=` from the address bar into storage. Runs before the first
+ * render so no request goes out without it.
+ */
+export function consumeTokenFromUrl() {
+  const url = new URL(window.location.href);
+  const token = url.searchParams.get("token");
+  if (!token) return;
+  setToken(token);
+  url.searchParams.delete("token");
+  window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   const token = getToken();
@@ -46,8 +59,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   } catch {
     // Fall through with the raw text as the message.
   }
-  if (response.status === 401) {
-    // Ask for the token again; Layout listens for this.
+  // Ask for the token again (Layout listens), unless the token changed while
+  // this request was in flight.
+  if (response.status === 401 && getToken() === token) {
     setToken(null);
     window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
   }

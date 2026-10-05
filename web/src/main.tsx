@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createBrowserRouter, RouterProvider } from "react-router";
 
-import { ApiError } from "./api/client";
+import { ApiError, consumeTokenFromUrl } from "./api/client";
 import { Layout } from "./components/Layout";
 import { CatalogFormPage } from "./pages/CatalogForm";
 import { HomePage } from "./pages/Home";
@@ -11,6 +11,8 @@ import { NotFoundPage } from "./pages/NotFound";
 import { SqlPage } from "./pages/SqlPage";
 import { TablePage } from "./pages/TablePage";
 import "./styles.css";
+
+consumeTokenFromUrl();
 
 const queryClient = new QueryClient({
   defaultOptions: {

@@ -10,20 +10,6 @@ export function Layout() {
   const info = useQuery({ queryKey: ["info"], queryFn: api.info });
   const [token, setTokenState] = useState(getToken());
 
-  // Accept ?token= once, then drop it from the address bar.
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const fromUrl = params.get("token");
-    if (fromUrl) {
-      setToken(fromUrl);
-      setTokenState(fromUrl);
-      params.delete("token");
-      const rest = params.toString();
-      window.history.replaceState(null, "", window.location.pathname + (rest ? `?${rest}` : ""));
-      queryClient.invalidateQueries();
-    }
-  }, [queryClient]);
-
   useEffect(() => {
     const onUnauthorized = () => setTokenState(null);
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
@@ -31,6 +17,8 @@ export function Layout() {
   }, []);
 
   const needsToken = info.data?.auth_required && !token;
+  // Until the server says whether it needs a token, load nothing else.
+  const ready = info.isSuccess;
 
   return (
     <div className="app">
@@ -47,7 +35,15 @@ export function Layout() {
         </nav>
         <span className="version">{info.data ? `v${info.data.version}` : ""}</span>
       </header>
-      {needsToken ? (
+      {!ready ? (
+        <div className="token-prompt">
+          {info.isError ? (
+            <p className="error">Cannot reach the BergPilot server: {errorMessage(info.error)}</p>
+          ) : (
+            <p className="muted">Connecting…</p>
+          )}
+        </div>
+      ) : needsToken ? (
         <TokenPrompt
           onSave={(value) => {
             setToken(value);
