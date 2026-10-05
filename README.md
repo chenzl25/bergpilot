@@ -2,11 +2,11 @@
 
 Observability and maintenance for Apache Iceberg™ tables, in a single Rust service. No JVM, no Spark.
 
-> **Status:** early. Nothing is usable yet; this repository currently holds the project skeleton.
+> **Status:** early. Milestone 1 works: connect REST catalogs, browse namespaces and tables, inspect schemas, snapshots and file sizes, and run read-only SQL.
 
 ## Goals
 
-- **Catalogs:** connect to REST, AWS Glue, S3 Tables and SQL catalogs (Hive Metastore read-only).
+- **Catalogs:** connect to REST, AWS Glue, S3 Tables and JDBC catalogs.
 - **Observability:** browse namespaces and tables; inspect schemas, partition specs, snapshots, branches, manifests and data/delete files; show file-size distribution and how it changes over time.
 - **SQL inspection:** run read queries against tables with Apache DataFusion.
 - **Maintenance:** compaction, snapshot expiry, orphan-file cleanup and manifest rewrites, on demand or on a schedule.
@@ -22,18 +22,44 @@ BergPilot is inspired by [Nimtable](https://github.com/nimtable/nimtable) and ma
 
 ## Roadmap
 
-1. **Read-only:** catalog browsing, metadata and manifest inspection, file distribution, `SELECT` queries.
-2. **Maintenance:** compaction, snapshot expiry, orphan cleanup, scheduling.
-3. **Writes:** an Iceberg REST catalog endpoint that proxies commits to the underlying catalog.
+1. **Read-only (done):** REST catalogs, browsing, table detail, file-size distribution, `SELECT` queries.
+2. **More catalogs:** AWS Glue, S3 Tables and JDBC.
+3. **Maintenance:** compaction, snapshot expiry, orphan cleanup and manifest rewrites, with scheduling.
+
+## Running
+
+Build the web UI, then the server; the release binary embeds the UI:
+
+```bash
+pnpm --dir web install
+pnpm --dir web build
+cargo build --release
+./target/release/bergpilot
+```
+
+Open http://127.0.0.1:7878 and add a catalog. BergPilot keeps its database and secret key in
+`~/.bergpilot` (`--data-dir` to change). It listens on 127.0.0.1; to listen on another address,
+set an access token with `BERGPILOT_TOKEN` and pass `--bind 0.0.0.0:7878`.
+
+In SQL, tables are named `catalog.namespace.table`. Write a nested namespace as one quoted
+identifier: `prod."sales.eu".orders`. Only read-only queries run.
 
 ## Development
 
-The toolchain is pinned in `rust-toolchain.toml`.
+The Rust toolchain is pinned in `rust-toolchain.toml`.
 
 ```bash
-cargo build
-cargo test
+docker compose -f dev/docker-compose.yml up -d   # REST catalog on :8181, storage on :9000
+cargo run --example seed                         # sample tables in namespace "demo"
+cargo run                                        # API and UI on :7878
+pnpm --dir web dev                               # UI with hot reload on :5173
 ```
+
+For the local catalog use URI `http://localhost:8181`, S3 endpoint `http://localhost:9000`,
+region `us-east-1`, access key `admin`, secret `password`, and path-style access.
+
+`cargo test` regenerates the TypeScript API types in `web/src/api/generated`; commit them with any
+change to `crates/bergpilot/src/types.rs`.
 
 ## License
 
