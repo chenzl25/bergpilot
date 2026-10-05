@@ -334,3 +334,187 @@ async fn run_job(router: &Router, body: Value) -> Value {
     }
     panic!("job {id} did not finish in time");
 }
+
+/// Position deletes written with iceberg-rust's writer: reads apply them, a
+/// files-with-deletes compaction keeps the result, and a full compaction
+/// drops the delete files.
+#[tokio::test(flavor = "multi_thread")]
+async fn compaction_applies_position_deletes() {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use datafusion::parquet::file::properties::WriterProperties;
+    use iceberg::spec::{DataFileFormat, NestedField, PrimitiveType, Schema, Type};
+    use iceberg::transaction::{ApplyTransactionAction, Transaction};
+    use iceberg::writer::base_writer::position_delete_file_writer::{
+        POSITION_DELETE_SCHEMA, PositionDeleteFileWriterBuilder,
+    };
+    use iceberg::writer::file_writer::ParquetWriterBuilder;
+    use iceberg::writer::file_writer::location_generator::{
+        DefaultFileNameGenerator, DefaultLocationGenerator,
+    };
+    use iceberg::writer::file_writer::rolling_writer::RollingFileWriterBuilder;
+    use iceberg::writer::{IcebergWriter, IcebergWriterBuilder, PositionDeleteInput};
+    use iceberg::{NamespaceIdent, TableCreation, TableIdent};
+
+    let dir = tempfile::tempdir().unwrap();
+    let local = LocalCatalog::new(dir.path()).await;
+    let namespace = NamespaceIdent::new("sales".to_owned());
+    local
+        .catalog
+        .create_namespace(&namespace, HashMap::new())
+        .await
+        .unwrap();
+    let schema = Schema::builder()
+        .with_fields(vec![
+            NestedField::required(1, "id", Type::Primitive(PrimitiveType::Long)).into(),
+            NestedField::optional(2, "v", Type::Primitive(PrimitiveType::Double)).into(),
+        ])
+        .build()
+        .unwrap();
+    local
+        .catalog
+        .create_table(
+            &namespace,
+            TableCreation::builder()
+                .name("plain".to_owned())
+                .schema(schema)
+                .build(),
+        )
+        .await
+        .unwrap();
+    let ctx = datafusion::prelude::SessionContext::new();
+    ctx.register_catalog(
+        "seed",
+        Arc::new(
+            iceberg_datafusion::IcebergCatalogProvider::try_new(local.catalog.clone())
+                .await
+                .unwrap(),
+        ),
+    );
+    for values in [
+        "(1, 1.0), (2, 2.0), (3, 3.0), (4, NULL)",
+        "(5, 5.0), (6, 6.0), (7, 7.0), (8, NULL)",
+        "(9, 9.0), (10, 10.0), (11, 11.0), (12, NULL)",
+    ] {
+        ctx.sql(&format!("INSERT INTO seed.sales.plain VALUES {values}"))
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+    }
+
+    // Delete rows 0 and 1 of the first data file and row 3 of the second.
+    let ident = TableIdent::new(namespace.clone(), "plain".to_owned());
+    let table = local.catalog.load_table(&ident).await.unwrap();
+    let mut paths: Vec<String> = bergpilot::metadata_tables::live_files(&table)
+        .await
+        .unwrap()
+        .iter()
+        .map(|live| live.file.file_path().to_owned())
+        .collect();
+    paths.sort();
+    assert_eq!(paths.len(), 3);
+    let rolling = RollingFileWriterBuilder::new_with_default_file_size(
+        ParquetWriterBuilder::new(
+            WriterProperties::builder().build(),
+            Arc::new(POSITION_DELETE_SCHEMA.clone()),
+        ),
+        table.file_io().clone(),
+        DefaultLocationGenerator::new(table.metadata()).unwrap(),
+        DefaultFileNameGenerator::new("pos-del".to_owned(), None, DataFileFormat::Parquet),
+    );
+    let mut writer = PositionDeleteFileWriterBuilder::new(rolling)
+        .build(None)
+        .await
+        .unwrap();
+    writer
+        .write(vec![
+            PositionDeleteInput::new(Arc::from(paths[0].as_str()), 0),
+            PositionDeleteInput::new(Arc::from(paths[0].as_str()), 1),
+            PositionDeleteInput::new(Arc::from(paths[1].as_str()), 3),
+        ])
+        .await
+        .unwrap();
+    let delete_files = writer.close().await.unwrap();
+    let tx = Transaction::new(&table);
+    let tx = tx
+        .fast_append()
+        .add_data_files(delete_files)
+        .apply(tx)
+        .unwrap();
+    tx.commit(local.catalog.as_ref()).await.unwrap();
+
+    let store = Store::open(&dir.path().join("bergpilot")).await.unwrap();
+    let state = AppState::new(store, None);
+    state.start().await.unwrap();
+    let router = app(state);
+    let (_, created) = call(
+        &router,
+        "POST",
+        "/api/catalogs",
+        Some(local.registration("local")),
+    )
+    .await;
+    let id = created["id"].as_i64().unwrap();
+    let target = json!({ "catalog_id": id, "namespace": ["sales"], "table": "plain" });
+    let with_task = |task: Value| {
+        let mut body = target.clone();
+        body["task"] = task;
+        body
+    };
+    let totals = || async {
+        let (_, result) = call(
+            &router,
+            "POST",
+            "/api/query",
+            Some(json!({ "sql": "SELECT count(*), sum(id) FROM local.sales.plain" })),
+        )
+        .await;
+        result["rows"].clone()
+    };
+    let delete_count = || async {
+        let (_, files) = call(
+            &router,
+            "GET",
+            &format!("/api/catalogs/{id}/table/files?namespace=sales&name=plain"),
+            None,
+        )
+        .await;
+        (
+            files["data"]["files"].as_u64().unwrap(),
+            files["position_deletes"]["files"].as_u64().unwrap(),
+        )
+    };
+
+    // Three of the twelve rows are deleted. The sum is checked only for
+    // staying the same, since which ids sit at those positions depends on
+    // how the writer ordered rows.
+    let before = totals().await;
+    assert_eq!(before[0][0], "9", "{before}");
+    assert_eq!(delete_count().await, (3, 1));
+
+    let job = run_job(
+        &router,
+        with_task(
+            json!({ "kind": "compact", "strategy": "files_with_deletes", "min_delete_files": 1 }),
+        ),
+    )
+    .await;
+    assert_eq!(job["outcome"]["input_delete_files"], 1, "{job}");
+    assert_eq!(totals().await, before);
+
+    let job = run_job(
+        &router,
+        with_task(json!({ "kind": "compact", "strategy": "full" })),
+    )
+    .await;
+    assert_eq!(job["outcome"]["rewrote"], true, "{job}");
+    assert_eq!(totals().await, before);
+    assert_eq!(
+        delete_count().await,
+        (1, 0),
+        "a full compaction drops the delete file"
+    );
+}
