@@ -19,6 +19,8 @@ iceberg-catalog-s3tables = { git = "https://github.com/risingwavelabs/iceberg-ru
 iceberg-catalog-sql = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "edc64dc1975eb05a8b795f920980d9bee206eb61" }
 iceberg-datafusion = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "edc64dc1975eb05a8b795f920980d9bee206eb61" }
 iceberg-storage-opendal = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "edc64dc1975eb05a8b795f920980d9bee206eb61", default-features = false, features = ["opendal-fs", "opendal-memory", "opendal-s3"] }
+# Pinned to the revision that uses the same iceberg-rust revision as above.
+iceberg-compaction-core = { git = "https://github.com/nimtable/iceberg-compaction.git", rev = "618f53cfefbf1d24e30a846d62dc222c6c76dd5d" }
 # Must match the DataFusion version the fork is built against.
 datafusion = "54.1.0"
 

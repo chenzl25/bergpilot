@@ -2,10 +2,11 @@
 
 mod browse;
 mod catalogs;
+mod jobs;
 mod query;
 
 use axum::Router;
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 
 use crate::server::AppState;
 
@@ -25,6 +26,18 @@ pub fn router() -> Router<AppState> {
         .route("/catalogs/{id}/table", get(browse::table))
         .route("/catalogs/{id}/table/files", get(browse::files))
         .route("/query", post(query::run))
+        .route("/jobs", get(jobs::list).post(jobs::submit))
+        .route("/jobs/{id}", get(jobs::get_one))
+        .route("/jobs/{id}/cancel", post(jobs::cancel))
+        .route("/maintenance/preview", post(jobs::preview))
+        .route(
+            "/schedules",
+            get(jobs::list_schedules).post(jobs::create_schedule),
+        )
+        .route(
+            "/schedules/{id}",
+            put(jobs::update_schedule).delete(jobs::delete_schedule),
+        )
 }
 
 /// Namespace levels travel in query strings joined by U+001F, the separator

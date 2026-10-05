@@ -73,6 +73,10 @@ impl Store {
         Ok(Self { pool, secrets })
     }
 
+    pub fn pool(&self) -> &SqlitePool {
+        &self.pool
+    }
+
     pub async fn list_catalogs(&self) -> ApiResult<Vec<CatalogRecord>> {
         let rows = sqlx::query(
             "select id, name, kind, properties, secrets, created_at, updated_at \

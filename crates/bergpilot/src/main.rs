@@ -65,5 +65,7 @@ async fn main() -> anyhow::Result<()> {
         println!("  The API requires the access token; the UI will ask for it.");
     }
 
-    serve(args.bind, AppState::new(store, token)).await
+    let state = AppState::new(store, token);
+    state.start().await?;
+    serve(args.bind, state).await
 }

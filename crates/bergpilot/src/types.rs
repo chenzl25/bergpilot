@@ -296,3 +296,277 @@ pub struct ServerInfo {
     /// Catalog types compiled into this build.
     pub catalog_kinds: Vec<CatalogKind>,
 }
+
+// ---------------------------------------------------------------------------
+// Maintenance
+// ---------------------------------------------------------------------------
+
+/// Which data files a compaction rewrites.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum CompactionStrategy {
+    /// Small files and files with many deletes.
+    Auto,
+    /// Files below the small-file threshold.
+    SmallFiles,
+    /// Files with at least `min_delete_files` delete files attached.
+    FilesWithDeletes,
+    /// Every data file.
+    Full,
+}
+
+/// A maintenance operation and its settings.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum MaintenanceTask {
+    /// Rewrite data files into fewer, larger ones and apply deletes.
+    Compact {
+        strategy: CompactionStrategy,
+        /// Output file size; defaults to 512 MiB.
+        #[serde(default)]
+        #[ts(optional)]
+        target_file_size_mb: Option<u32>,
+        /// "Small" for `auto` and `small_files`; defaults to 32 MiB.
+        #[serde(default)]
+        #[ts(optional)]
+        small_file_threshold_mb: Option<u32>,
+        /// Delete files per data file that trigger a rewrite; defaults to 128
+        /// (`auto`) or 1 (`files_with_deletes`).
+        #[serde(default)]
+        #[ts(optional)]
+        min_delete_files: Option<u32>,
+    },
+    /// Remove old snapshots from the metadata.
+    ExpireSnapshots {
+        /// Expire snapshots older than this many days (0 = all but the
+        /// retained ones).
+        older_than_days: u32,
+        /// Snapshots to keep on each branch regardless of age (at least 1).
+        retain_last: u32,
+        /// Also delete data, manifest and manifest-list files that only the
+        /// expired snapshots referenced.
+        clean_files: bool,
+    },
+    /// Delete files under the table location that no snapshot references.
+    RemoveOrphanFiles {
+        /// Only files last modified more than this many days ago; at least 1
+        /// unless `dry_run`, so in-flight writes are never touched.
+        older_than_days: u32,
+        /// Only report what would be deleted.
+        dry_run: bool,
+    },
+    /// Merge the current snapshot's data manifests.
+    RewriteManifests,
+}
+
+impl MaintenanceTask {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            MaintenanceTask::Compact { .. } => "compact",
+            MaintenanceTask::ExpireSnapshots { .. } => "expire_snapshots",
+            MaintenanceTask::RemoveOrphanFiles { .. } => "remove_orphan_files",
+            MaintenanceTask::RewriteManifests => "rewrite_manifests",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum JobStatus {
+    Queued,
+    Running,
+    Succeeded,
+    Failed,
+    Cancelled,
+}
+
+impl JobStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            JobStatus::Queued => "queued",
+            JobStatus::Running => "running",
+            JobStatus::Succeeded => "succeeded",
+            JobStatus::Failed => "failed",
+            JobStatus::Cancelled => "cancelled",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        [
+            JobStatus::Queued,
+            JobStatus::Running,
+            JobStatus::Succeeded,
+            JobStatus::Failed,
+            JobStatus::Cancelled,
+        ]
+        .into_iter()
+        .find(|status| status.as_str() == value)
+    }
+}
+
+/// What a finished job did.
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum JobOutcome {
+    Compact {
+        /// False when no files matched the strategy.
+        rewrote: bool,
+        #[ts(type = "number")]
+        input_data_files: u64,
+        #[ts(type = "number")]
+        input_delete_files: u64,
+        #[ts(type = "number")]
+        input_bytes: u64,
+        #[ts(type = "number")]
+        output_files: u64,
+        #[ts(type = "number")]
+        output_bytes: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        snapshot_id: Option<String>,
+    },
+    ExpireSnapshots {
+        expired_snapshot_ids: Vec<String>,
+        remaining_snapshots: u32,
+        cleaned_files: bool,
+    },
+    RemoveOrphanFiles {
+        dry_run: bool,
+        #[ts(type = "number")]
+        count: u64,
+        /// The first 500 paths.
+        files: Vec<String>,
+    },
+    RewriteManifests {
+        manifests_before: u32,
+        manifests_after: u32,
+    },
+}
+
+/// The table a job or schedule works on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TableRef {
+    #[ts(type = "number")]
+    pub catalog_id: i64,
+    pub namespace: Vec<String>,
+    pub table: String,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct JobInfo {
+    #[ts(type = "number")]
+    pub id: i64,
+    #[serde(flatten)]
+    pub target: TableRef,
+    pub catalog_name: String,
+    pub task: MaintenanceTask,
+    pub status: JobStatus,
+    /// Set when a schedule queued the job.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub schedule_id: Option<i64>,
+    pub created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub started_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub finished_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub outcome: Option<JobOutcome>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, TS)]
+#[ts(export)]
+pub struct JobRequest {
+    #[serde(flatten)]
+    pub target: TableRef,
+    pub task: MaintenanceTask,
+}
+
+/// One group of files a compaction would rewrite together.
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct CompactionGroup {
+    #[ts(type = "number")]
+    pub data_files: u64,
+    #[ts(type = "number")]
+    pub delete_files: u64,
+    #[ts(type = "number")]
+    pub bytes: u64,
+}
+
+/// What `MaintenanceTask` would do, computed without changing the table.
+#[derive(Clone, Debug, Serialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum MaintenancePreview {
+    Compact {
+        groups: Vec<CompactionGroup>,
+        #[ts(type = "number")]
+        data_files: u64,
+        #[ts(type = "number")]
+        delete_files: u64,
+        #[ts(type = "number")]
+        bytes: u64,
+    },
+    ExpireSnapshots {
+        expired_snapshot_ids: Vec<String>,
+        remaining_snapshots: u32,
+    },
+    RewriteManifests {
+        data_manifests: u32,
+        delete_manifests: u32,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, TS)]
+#[ts(export)]
+pub struct PreviewRequest {
+    #[serde(flatten)]
+    pub target: TableRef,
+    pub task: MaintenanceTask,
+}
+
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct ScheduleInfo {
+    #[ts(type = "number")]
+    pub id: i64,
+    #[serde(flatten)]
+    pub target: TableRef,
+    pub catalog_name: String,
+    pub task: MaintenanceTask,
+    /// Five-field cron expression in the server's local time.
+    pub cron: String,
+    /// Plain-language reading of `cron`.
+    pub cron_description: String,
+    pub enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub next_run_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub last_job_id: Option<i64>,
+    pub created_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, TS)]
+#[ts(export)]
+pub struct ScheduleInput {
+    #[serde(flatten)]
+    pub target: TableRef,
+    pub task: MaintenanceTask,
+    pub cron: String,
+    pub enabled: bool,
+}

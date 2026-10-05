@@ -19,9 +19,12 @@ sql = ["dep:iceberg-catalog-sql", "sqlx/postgres", "sqlx/mysql", "sqlx/any"]
 [dependencies]
 aes-gcm = "0.10"
 anyhow = "1"
+async-trait = "0.1"
 axum = "0.8"
 base64 = "0.22"
+chrono = "0.4"
 clap = { version = "4", features = ["derive", "env"] }
+croner = "4"
 datafusion = { workspace = true }
 futures = "0.3"
 iceberg = { workspace = true }
@@ -29,6 +32,7 @@ iceberg-catalog-glue = { workspace = true, optional = true }
 iceberg-catalog-rest = { workspace = true }
 iceberg-catalog-s3tables = { workspace = true, optional = true }
 iceberg-catalog-sql = { workspace = true, optional = true }
+iceberg-compaction-core = { workspace = true }
 iceberg-datafusion = { workspace = true }
 iceberg-storage-opendal = { workspace = true }
 lru = "0.16"

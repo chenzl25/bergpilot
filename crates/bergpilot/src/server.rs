@@ -14,6 +14,8 @@ use tower_http::trace::TraceLayer;
 use crate::catalogs::CatalogRegistry;
 use crate::error::ApiError;
 use crate::files::FileStatsCache;
+use crate::jobs::Jobs;
+use crate::maintenance::MaintenanceLimits;
 use crate::query::QueryLimits;
 use crate::store::Store;
 
@@ -23,6 +25,7 @@ const QUERY_SLOTS: usize = 2;
 #[derive(Clone)]
 pub struct AppState {
     pub registry: CatalogRegistry,
+    pub jobs: Jobs,
     pub file_stats: FileStatsCache,
     pub query_limits: QueryLimits,
     pub query_slots: Arc<Semaphore>,
@@ -32,14 +35,29 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// State without background work; call [`AppState::start`] to run jobs
+    /// and schedules.
     pub fn new(store: Store, token: Option<String>) -> Self {
+        let registry = CatalogRegistry::new(store.clone());
         Self {
-            registry: CatalogRegistry::new(store),
+            jobs: Jobs::new(
+                store.pool().clone(),
+                registry.clone(),
+                MaintenanceLimits::default(),
+            ),
+            registry,
             file_stats: FileStatsCache::default(),
             query_limits: QueryLimits::default(),
             query_slots: Arc::new(Semaphore::new(QUERY_SLOTS)),
             token: token.map(Arc::from),
         }
+    }
+}
+
+impl AppState {
+    /// Start the job worker and the scheduler.
+    pub async fn start(&self) -> anyhow::Result<()> {
+        self.jobs.start().await
     }
 }
 
