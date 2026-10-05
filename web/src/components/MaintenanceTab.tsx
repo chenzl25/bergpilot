@@ -92,6 +92,12 @@ function CompactCard({ target }: { target: TableRef }) {
           onChange={setMinDeletes}
         />
       )}
+      {strategy !== "full" && (
+        <p className="muted small">
+          Delete files of rewritten data stay listed (and are read) until a compaction of all files
+          removes them.
+        </p>
+      )}
     </TaskCard>
   );
 }
