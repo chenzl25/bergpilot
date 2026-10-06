@@ -27,7 +27,7 @@ import type { ScheduleInfo } from "@/api/generated/ScheduleInfo";
 import type { TableDetail } from "@/api/generated/TableDetail";
 import type { TableRef } from "@/api/generated/TableRef";
 import { type ConfirmOptions, useConfirm } from "@/components/confirm";
-import { JobStatusBadge } from "@/components/job-status";
+import { JobProgressView, JobStatusBadge } from "@/components/job-status";
 import { JobsTable, SchedulesTable } from "@/components/JobsTable";
 import { ErrorNotice, Panel, Section } from "@/components/page";
 import { Button } from "@/components/ui/button";
@@ -147,10 +147,7 @@ interface Finding {
 
 /** Same thresholds as the "worth a look" notes (health.ts), with an explanation and a fix. */
 function findings(detail: TableDetail): Finding[] {
-  const summary = detail.snapshots.find((s) => s.snapshot_id === detail.current_snapshot_id)?.summary ?? {};
-  const files = Number(summary["total-data-files"] ?? 0);
-  const bytes = Number(summary["total-files-size"] ?? 0);
-  const deletes = Number(summary["total-delete-files"] ?? 0);
+  const { data_files: files, bytes, delete_files: deletes } = detail.totals;
   const snapshots = detail.snapshots.length;
   const list: Finding[] = [];
   if (files >= 16 && bytes / files < SMALL_FILE_BYTES) {
@@ -315,6 +312,9 @@ function OperationRow(props: { task: TaskDef; lastJob?: JobInfo; schedules: Sche
             </span>
           )}
         </div>
+        {lastJob?.status === "running" && lastJob.progress && (
+          <JobProgressView progress={lastJob.progress} className="mt-2.5 max-w-md" />
+        )}
       </div>
       <Button variant="outline" size="sm" onClick={props.onOpen}>
         {task.preview ? "Preview" : "Set up"}
@@ -363,8 +363,7 @@ function TaskSheet(props: {
   }, []);
 
   const stale = previewed !== null && previewed !== JSON.stringify(normalized);
-  const current = props.detail.snapshots.find((s) => s.snapshot_id === props.detail.current_snapshot_id);
-  const deleteFiles = Number(current?.summary["total-delete-files"] ?? 0);
+  const deleteFiles = props.detail.totals.delete_files;
   const description =
     def.kind === "expire_snapshots"
       ? `${def.description} The table has ${formatNumber(props.detail.snapshots.length)} snapshot${props.detail.snapshots.length === 1 ? "" : "s"}.`

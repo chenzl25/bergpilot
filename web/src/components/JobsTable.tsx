@@ -7,7 +7,7 @@ import { api } from "@/api/client";
 import type { JobInfo } from "@/api/generated/JobInfo";
 import type { ScheduleInfo } from "@/api/generated/ScheduleInfo";
 import { useConfirm } from "@/components/confirm";
-import { JobStatusBadge } from "@/components/job-status";
+import { JobProgressView, JobStatusBadge } from "@/components/job-status";
 import { Panel } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -85,6 +85,7 @@ export function JobsTable({ jobs, showTable }: { jobs: JobInfo[]; showTable: boo
               </TableCell>
               <TableCell className="text-right tabular-nums">{formatDuration(job.started_at, job.finished_at)}</TableCell>
               <TableCell className={cn("max-w-96 whitespace-normal", job.error && "text-destructive")}>
+                {job.status === "running" && job.progress && <JobProgressView progress={job.progress} />}
                 {job.outcome ? describeOutcome(job.outcome) : (job.error ?? "")}
                 {job.outcome?.kind === "remove_orphan_files" && job.outcome.files.length > 0 && (
                   <Collapsible>

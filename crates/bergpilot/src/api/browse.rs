@@ -5,6 +5,7 @@ use serde::Deserialize;
 
 use super::split_namespace;
 use crate::error::{ApiError, ApiResult};
+use crate::files::{current_totals, manifest_list_counts, summary_matches, summary_number};
 use crate::metadata::table_detail;
 use crate::server::AppState;
 use crate::types::{
@@ -84,7 +85,8 @@ pub async fn table(
     let connected = state.registry.get(id).await?;
     let ident = TableIdent::new(namespace_ident(&query.namespace)?, query.name);
     let table = connected.catalog.load_table(&ident).await?;
-    Ok(Json(table_detail(&connected.record.name, &table)))
+    let totals = current_totals(&table, &state.file_stats).await?;
+    Ok(Json(table_detail(&connected.record.name, &table, totals)))
 }
 
 pub async fn files(
@@ -133,7 +135,7 @@ pub async fn namespace_detail(
             let ident = TableIdent::new(namespace.clone(), name.clone());
             async move {
                 match catalog.load_table(&ident).await {
-                    Ok(table) => summarize(name, &table),
+                    Ok(table) => summarize(name, &table).await,
                     Err(error) => TableSummary {
                         name,
                         format_version: None,
@@ -168,29 +170,49 @@ pub async fn namespace_detail(
     }))
 }
 
-fn summarize(name: String, table: &iceberg::table::Table) -> TableSummary {
+/// A table's line on the namespace page. Counts come from the manifest
+/// list; the size comes from the snapshot summary, and only when the
+/// summary's counts agree with the manifest list (see
+/// [`crate::files::current_totals`]).
+async fn summarize(name: String, table: &iceberg::table::Table) -> TableSummary {
     let metadata = table.metadata();
-    let summary = metadata
-        .current_snapshot()
-        .map(|snapshot| &snapshot.summary().additional_properties);
-    let number = |key: &str| {
-        summary
-            .and_then(|summary| summary.get(key))
-            .and_then(|value| value.parse::<u64>().ok())
-    };
-    let empty = metadata.current_snapshot().is_none();
-    let or_zero = |value: Option<u64>| if empty { Some(0) } else { value };
-    TableSummary {
+    let mut summary = TableSummary {
         name,
         format_version: Some(metadata.format_version() as u8),
-        records: or_zero(number("total-records")),
-        data_files: or_zero(number("total-data-files")),
-        data_bytes: or_zero(number("total-files-size")),
-        delete_files: or_zero(number("total-delete-files")),
+        records: None,
+        data_files: None,
+        data_bytes: None,
+        delete_files: None,
         snapshots: metadata.snapshots().len() as u32,
         last_updated_ms: Some(metadata.last_updated_ms()),
         error: None,
+    };
+    let Some(snapshot) = metadata.current_snapshot() else {
+        summary.records = Some(0);
+        summary.data_files = Some(0);
+        summary.data_bytes = Some(0);
+        summary.delete_files = Some(0);
+        return summary;
+    };
+    match manifest_list_counts(table, snapshot).await {
+        Ok(Some(counts)) => {
+            summary.records = Some(counts.records);
+            summary.data_files = Some(counts.data_files);
+            summary.delete_files = Some(counts.delete_files);
+            if summary_matches(snapshot, &counts) {
+                summary.data_bytes = summary_number(snapshot, "total-files-size");
+            }
+        }
+        // Old manifests without counts: the summary is all there is.
+        Ok(None) => {
+            summary.records = summary_number(snapshot, "total-records");
+            summary.data_files = summary_number(snapshot, "total-data-files");
+            summary.data_bytes = summary_number(snapshot, "total-files-size");
+            summary.delete_files = summary_number(snapshot, "total-delete-files");
+        }
+        Err(error) => summary.error = Some(error.to_string()),
     }
+    summary
 }
 
 /// Namespaces walked for completion, and how deep.
@@ -299,7 +321,8 @@ pub async fn update_properties(
     }
     let tx = action.apply(tx)?;
     let updated = tx.commit(connected.catalog.as_ref()).await?;
-    Ok(Json(table_detail(&connected.record.name, &updated)))
+    let totals = current_totals(&updated, &state.file_stats).await?;
+    Ok(Json(table_detail(&connected.record.name, &updated, totals)))
 }
 
 pub async fn partitions(

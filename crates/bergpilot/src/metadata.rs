@@ -4,10 +4,12 @@ use iceberg::spec::{NestedFieldRef, Schema, TableMetadata, Type};
 use iceberg::table::Table;
 
 use crate::types::{
-    PartitionFieldInfo, RefInfo, RefKind, SchemaField, SnapshotInfo, SortFieldInfo, TableDetail,
+    CurrentTotals, PartitionFieldInfo, RefInfo, RefKind, SchemaField, SnapshotInfo, SortFieldInfo,
+    TableDetail,
 };
 
-pub fn table_detail(catalog: &str, table: &Table) -> TableDetail {
+/// `totals` are the current snapshot's, from [`crate::files::current_totals`].
+pub fn table_detail(catalog: &str, table: &Table, totals: CurrentTotals) -> TableDetail {
     let metadata = table.metadata();
     let schema = metadata.current_schema();
     let column = |source_id: i32| {
@@ -75,6 +77,7 @@ pub fn table_detail(catalog: &str, table: &Table) -> TableDetail {
             .collect(),
         snapshots,
         refs: refs(metadata),
+        totals,
     }
 }
 

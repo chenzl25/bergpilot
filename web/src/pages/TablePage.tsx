@@ -93,11 +93,10 @@ export function TablePage() {
   }
   const detail = table.data;
   const qualified = sqlTableName(detail.catalog, namespace, name);
-  const summary = detail.snapshots.find((s) => s.snapshot_id === detail.current_snapshot_id)?.summary ?? {};
   const notes = attention({
-    data_files: Number(summary["total-data-files"] ?? 0),
-    data_bytes: Number(summary["total-files-size"] ?? 0),
-    delete_files: Number(summary["total-delete-files"] ?? 0),
+    data_files: detail.totals.data_files,
+    data_bytes: detail.totals.bytes,
+    delete_files: detail.totals.delete_files,
     snapshots: detail.snapshots.length,
   });
 
@@ -174,11 +173,8 @@ export function TablePage() {
 }
 
 function Overview({ detail, catalogId, notes }: { detail: TableDetail; catalogId: number; notes: string[] }) {
-  const current = detail.snapshots.find((s) => s.snapshot_id === detail.current_snapshot_id);
-  const summary = current?.summary ?? {};
-  const deleteFiles = Number(summary["total-delete-files"] ?? 0);
-  const files = Number(summary["total-data-files"] ?? 0);
-  const bytes = Number(summary["total-files-size"] ?? 0);
+  const { records, data_files: files, delete_files: deleteFiles, bytes } = detail.totals;
+  const empty = detail.current_snapshot_id === undefined;
   return (
     <div className="flex flex-col gap-6">
       {notes.length > 0 && (
@@ -197,18 +193,18 @@ function Overview({ detail, catalogId, notes }: { detail: TableDetail; catalogId
         </Alert>
       )}
       <StatGrid>
-        <Stat icon={Rows3} label="Records" value={formatNumber(summary["total-records"])} />
+        <Stat icon={Rows3} label="Records" value={empty ? "—" : formatNumber(records)} />
         <Stat
           icon={Files}
           label="Data files"
-          value={formatNumber(summary["total-data-files"])}
+          value={empty ? "—" : formatNumber(files)}
           hint={files ? `avg ${formatBytes(bytes / files)}` : undefined}
         />
-        <Stat icon={Database} label="Data size" value={summary["total-files-size"] ? formatBytes(bytes) : "—"} />
+        <Stat icon={Database} label="Size" value={empty ? "—" : formatBytes(bytes)} />
         <Stat
           icon={FileX}
           label="Delete files"
-          value={formatNumber(summary["total-delete-files"])}
+          value={empty ? "—" : formatNumber(deleteFiles)}
           tone={deleteFiles > 0 ? "warning" : undefined}
         />
         <Stat icon={History} label="Snapshots" value={formatNumber(detail.snapshots.length)} />

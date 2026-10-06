@@ -4,12 +4,12 @@ use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 
 use futures::{StreamExt, TryStreamExt};
-use iceberg::spec::{DataContentType, ManifestFile};
+use iceberg::spec::{DataContentType, ManifestContentType, ManifestFile, SnapshotRef};
 use iceberg::table::Table;
 use lru::LruCache;
 
 use crate::error::{ApiError, ApiResult};
-use crate::types::{FileStats, FileTotals, SizeBucket};
+use crate::types::{CurrentTotals, FileStats, FileTotals, SizeBucket};
 
 const MIB: u64 = 1024 * 1024;
 
@@ -95,6 +95,78 @@ impl FileStatsCache {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
     }
+}
+
+/// Totals of the current snapshot.
+///
+/// Snapshot summaries carry the same totals, but they can be wrong:
+/// iceberg-rust leaves the delete files a rewrite drops out of the summary,
+/// and every later commit adds to the wrong totals. The manifest list counts
+/// the files of each manifest, so one small read tells whether the summary
+/// still holds; when it does not, the totals come from the manifests.
+pub async fn current_totals(table: &Table, cache: &FileStatsCache) -> ApiResult<CurrentTotals> {
+    let Some(snapshot) = table.metadata().current_snapshot() else {
+        return Ok(CurrentTotals::default());
+    };
+    if let Some(counts) = manifest_list_counts(table, snapshot).await?
+        && let Some(bytes) = summary_number(snapshot, "total-files-size")
+        && summary_matches(snapshot, &counts)
+    {
+        return Ok(CurrentTotals { bytes, ..counts });
+    }
+    let stats = cache.stats(table, None).await?;
+    Ok(CurrentTotals {
+        records: stats.data.records,
+        data_files: stats.data.files,
+        delete_files: stats.position_deletes.files + stats.equality_deletes.files,
+        bytes: stats.data.bytes + stats.position_deletes.bytes + stats.equality_deletes.bytes,
+    })
+}
+
+/// File and record counts of `snapshot` from its manifest list, without
+/// bytes. `None` when a manifest does not record its counts.
+pub async fn manifest_list_counts(
+    table: &Table,
+    snapshot: &SnapshotRef,
+) -> ApiResult<Option<CurrentTotals>> {
+    let list = table.manifest_list_reader(snapshot).load().await?;
+    let mut counts = CurrentTotals::default();
+    for manifest in list.entries() {
+        let (Some(added), Some(existing)) =
+            (manifest.added_files_count, manifest.existing_files_count)
+        else {
+            return Ok(None);
+        };
+        let files = u64::from(added) + u64::from(existing);
+        match manifest.content {
+            ManifestContentType::Data => {
+                let (Some(added), Some(existing)) =
+                    (manifest.added_rows_count, manifest.existing_rows_count)
+                else {
+                    return Ok(None);
+                };
+                counts.data_files += files;
+                counts.records += added + existing;
+            }
+            ManifestContentType::Deletes => counts.delete_files += files,
+        }
+    }
+    Ok(Some(counts))
+}
+
+/// Whether the summary's file counts agree with `counts`.
+pub fn summary_matches(snapshot: &SnapshotRef, counts: &CurrentTotals) -> bool {
+    summary_number(snapshot, "total-data-files") == Some(counts.data_files)
+        && summary_number(snapshot, "total-delete-files") == Some(counts.delete_files)
+        && summary_number(snapshot, "total-records") == Some(counts.records)
+}
+
+pub fn summary_number(snapshot: &SnapshotRef, key: &str) -> Option<u64> {
+    snapshot
+        .summary()
+        .additional_properties
+        .get(key)
+        .and_then(|value| value.parse().ok())
 }
 
 fn empty_stats() -> FileStats {

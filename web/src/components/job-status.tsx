@@ -8,11 +8,13 @@ import { toast } from "sonner";
 
 import { api } from "@/api/client";
 import type { JobInfo } from "@/api/generated/JobInfo";
+import type { JobProgress } from "@/api/generated/JobProgress";
 import type { JobStatus } from "@/api/generated/JobStatus";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import { Spinner } from "@/components/ui/spinner";
 import { tablePath } from "@/format";
-import { describeOutcome, isActive, TASK_LABELS } from "@/jobs";
+import { describeOutcome, describeProgress, isActive, progressPercent, TASK_LABELS } from "@/jobs";
 import { cn } from "@/lib/utils";
 
 const STATUS: Record<JobStatus, { label: string; className: string }> = {
@@ -34,6 +36,21 @@ export function JobStatusBadge({ status }: { status: JobStatus }) {
       {status === "cancelled" && <Ban />}
       {config.label}
     </Badge>
+  );
+}
+
+/** A bar and one line of text for a running job that reports progress. */
+export function JobProgressView({ progress, className }: { progress: JobProgress; className?: string }) {
+  const percent = progressPercent(progress);
+  return (
+    <div className={cn("flex min-w-48 flex-col gap-1.5", className)}>
+      <Progress
+        value={percent ?? 0}
+        aria-label={describeProgress(progress)}
+        className={cn(percent === undefined && "animate-pulse")}
+      />
+      <span className="text-xs text-muted-foreground tabular-nums">{describeProgress(progress)}</span>
+    </div>
   );
 }
 

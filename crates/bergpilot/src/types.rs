@@ -211,6 +211,23 @@ pub struct TableDetail {
     /// Oldest first.
     pub snapshots: Vec<SnapshotInfo>,
     pub refs: Vec<RefInfo>,
+    /// Totals of the current snapshot, checked against its manifests.
+    pub totals: CurrentTotals,
+}
+
+/// Live files and records of a snapshot. Records count the rows in data
+/// files, before deletes apply; bytes include delete files.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct CurrentTotals {
+    #[ts(type = "number")]
+    pub records: u64,
+    #[ts(type = "number")]
+    pub data_files: u64,
+    #[ts(type = "number")]
+    pub delete_files: u64,
+    #[ts(type = "number")]
+    pub bytes: u64,
 }
 
 /// Count, bytes and records of one kind of file.

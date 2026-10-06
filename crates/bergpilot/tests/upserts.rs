@@ -218,6 +218,20 @@ async fn reads_and_compacts_equality_deletes() {
         (1, 0, 0),
         "a full compaction leaves one data file and no deletes"
     );
+    // The table page counts live files, whatever the snapshot summary says.
+    let (_, detail) = call(
+        &fixture.router,
+        "GET",
+        &format!(
+            "/api/catalogs/{}/table?namespace=sales&name=accounts",
+            fixture.catalog_id
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(detail["totals"]["data_files"], 1, "{}", detail["totals"]);
+    assert_eq!(detail["totals"]["delete_files"], 0, "{}", detail["totals"]);
+    assert_eq!(detail["totals"]["records"], 5, "{}", detail["totals"]);
 }
 
 /// The writer commits updates and deletes of rows the compaction is

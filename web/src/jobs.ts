@@ -2,6 +2,7 @@
 
 import type { JobInfo } from "./api/generated/JobInfo";
 import type { JobOutcome } from "./api/generated/JobOutcome";
+import type { JobProgress } from "./api/generated/JobProgress";
 import type { MaintenanceTask } from "./api/generated/MaintenanceTask";
 import { formatBytes, formatNumber } from "./format";
 
@@ -61,6 +62,27 @@ export function describeOutcome(outcome: JobOutcome): string {
         return `Nothing to merge (${outcome.manifests_before} manifest${outcome.manifests_before === 1 ? "" : "s"})`;
       }
       return `Merged ${outcome.manifests_before} manifests into ${outcome.manifests_after}`;
+  }
+}
+
+/** How much of a running job is done, in percent; undefined until known. */
+export function progressPercent(progress: JobProgress): number | undefined {
+  if (progress.phase === "committing") return 100;
+  if (progress.phase === "planning" || progress.bytes_total === 0) return undefined;
+  return Math.min(100, (100 * progress.bytes_done) / progress.bytes_total);
+}
+
+export function describeProgress(progress: JobProgress): string {
+  switch (progress.phase) {
+    case "planning":
+      return "Finding files to rewrite";
+    case "rewriting":
+      return (
+        `Read ${formatNumber(progress.files_done)} of ${formatNumber(progress.files_total)} data files, ` +
+        `${formatBytes(progress.bytes_done)} of ${formatBytes(progress.bytes_total)}`
+      );
+    case "committing":
+      return `Committing ${formatNumber(progress.files_total)} rewritten files`;
   }
 }
 
