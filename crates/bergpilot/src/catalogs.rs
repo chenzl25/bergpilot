@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use iceberg::io::StorageFactory;
 use iceberg::{Catalog, CatalogBuilder};
 use iceberg_catalog_rest::RestCatalogBuilder;
 use iceberg_storage_opendal::OpenDalResolvingStorageFactory;
@@ -27,8 +28,20 @@ pub fn compiled_kinds() -> Vec<CatalogKind> {
 
 /// Build a catalog client for `record`. Nothing is cached.
 pub async fn connect(record: &CatalogRecord) -> ApiResult<Arc<dyn Catalog>> {
+    connect_with_storage(record, default_storage()).await
+}
+
+/// The storage every catalog client reads and writes files through.
+pub fn default_storage() -> Arc<dyn StorageFactory> {
+    Arc::new(OpenDalResolvingStorageFactory::new())
+}
+
+/// Build a catalog client for `record` whose tables use `storage` for files.
+pub async fn connect_with_storage(
+    record: &CatalogRecord,
+    storage: Arc<dyn StorageFactory>,
+) -> ApiResult<Arc<dyn Catalog>> {
     let props: HashMap<String, String> = record.connection_properties().into_iter().collect();
-    let storage = Arc::new(OpenDalResolvingStorageFactory::new());
     let name = record.name.clone();
     let failed = |error: iceberg::Error| {
         ApiError::Upstream(redact(

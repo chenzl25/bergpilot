@@ -8,11 +8,10 @@ mod common;
 
 use std::time::{Duration, SystemTime};
 
-use axum::Router;
 use axum::http::StatusCode;
 use bergpilot::server::{AppState, app};
 use bergpilot::store::Store;
-use common::{LocalCatalog, call};
+use common::{LocalCatalog, call, run_job};
 use serde_json::{Value, json};
 
 const BATCHES: [&str; 5] = [
@@ -317,22 +316,6 @@ async fn schedules_queue_jobs_when_due() {
     )
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
-}
-
-/// Submit a job and wait for it to finish successfully.
-async fn run_job(router: &Router, body: Value) -> Value {
-    let (status, job) = call(router, "POST", "/api/jobs", Some(body)).await;
-    assert_eq!(status, StatusCode::CREATED, "{job}");
-    let id = job["id"].as_i64().unwrap();
-    for _ in 0..600 {
-        let (_, job) = call(router, "GET", &format!("/api/jobs/{id}"), None).await;
-        match job["status"].as_str().unwrap() {
-            "succeeded" => return job,
-            "failed" | "cancelled" => panic!("job did not succeed: {job}"),
-            _ => tokio::time::sleep(Duration::from_millis(100)).await,
-        }
-    }
-    panic!("job {id} did not finish in time");
 }
 
 /// Position deletes written with iceberg-rust's writer: reads apply them, a

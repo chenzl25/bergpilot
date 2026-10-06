@@ -12,6 +12,9 @@ pub enum ApiError {
     NotFound(String),
     #[error("{0}")]
     Unauthorized(String),
+    /// The table changed in a way that makes the request unsafe to finish.
+    #[error("{0}")]
+    Conflict(String),
     /// The catalog or storage behind a request failed.
     #[error("{0}")]
     Upstream(String),
@@ -25,6 +28,7 @@ impl ApiError {
             ApiError::BadRequest(_) => StatusCode::BAD_REQUEST,
             ApiError::NotFound(_) => StatusCode::NOT_FOUND,
             ApiError::Unauthorized(_) => StatusCode::UNAUTHORIZED,
+            ApiError::Conflict(_) => StatusCode::CONFLICT,
             ApiError::Upstream(_) => StatusCode::BAD_GATEWAY,
             ApiError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }

@@ -13,19 +13,11 @@ use iceberg::{
     Catalog, Error, ErrorKind, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent,
     TableUpdate,
 };
-use iceberg_compaction_core::compaction::CompactionBuilder;
-use iceberg_compaction_core::config::{
-    AutoCompactionConfig, BinPackConfig, CompactionConfig, CompactionExecutionConfig,
-    CompactionPlanningConfig, FilesWithDeletesConfig, FullCompactionConfig, GroupingStrategy,
-    SmallFilesConfig,
-};
 
 use crate::error::{ApiError, ApiResult};
-use crate::types::{
-    CompactionGroup, CompactionStrategy, JobOutcome, MaintenancePreview, MaintenanceTask,
-};
+use crate::io_counter::IoCounter;
+use crate::types::{JobOutcome, JobProgress, MaintenancePreview, MaintenanceTask};
 
-const MIB: u64 = 1024 * 1024;
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 /// Orphan paths kept in a job outcome; the count is always exact.
 const MAX_REPORTED_FILES: usize = 500;
@@ -45,6 +37,41 @@ impl Default for MaintenanceLimits {
             compaction_memory_bytes: 2 * 1024 * 1024 * 1024,
             max_running_jobs: 2,
         }
+    }
+}
+
+/// Where a running job reports how far it has got, and the I/O counter of
+/// the catalog client it runs with, if that client counts.
+#[derive(Clone, Default)]
+pub struct Progress {
+    report: Option<Arc<dyn Fn(JobProgress) + Send + Sync>>,
+    io: Option<Arc<IoCounter>>,
+}
+
+impl Progress {
+    pub fn new(
+        report: impl Fn(JobProgress) + Send + Sync + 'static,
+        io: Option<Arc<IoCounter>>,
+    ) -> Self {
+        Self {
+            report: Some(Arc::new(report)),
+            io,
+        }
+    }
+
+    /// Nobody is listening.
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    pub fn report(&self, progress: JobProgress) {
+        if let Some(report) = &self.report {
+            report(progress);
+        }
+    }
+
+    pub fn io(&self) -> Option<&IoCounter> {
+        self.io.as_deref()
     }
 }
 
@@ -100,30 +127,7 @@ pub async fn preview(
     validate(task)?;
     match task {
         MaintenanceTask::Compact { .. } => {
-            let compaction = CompactionBuilder::new(catalog, ident.clone())
-                .with_config(Arc::new(compaction_config(task, limits)))
-                .build();
-            let plans = compaction
-                .plan_compaction()
-                .await
-                .map_err(compaction_error)?;
-            let groups: Vec<CompactionGroup> = plans
-                .iter()
-                .filter(|plan| plan.has_files())
-                .map(|plan| CompactionGroup {
-                    data_files: plan.file_group.data_files.len() as u64,
-                    delete_files: (plan.file_group.position_delete_files.len()
-                        + plan.file_group.equality_delete_files.len())
-                        as u64,
-                    bytes: plan.total_bytes(),
-                })
-                .collect();
-            Ok(MaintenancePreview::Compact {
-                data_files: groups.iter().map(|g| g.data_files).sum(),
-                delete_files: groups.iter().map(|g| g.delete_files).sum(),
-                bytes: groups.iter().map(|g| g.bytes).sum(),
-                groups,
-            })
+            crate::compaction::preview(catalog, ident, task, limits).await
         }
         MaintenanceTask::ExpireSnapshots {
             older_than_days,
@@ -173,44 +177,12 @@ pub async fn run(
     ident: &TableIdent,
     task: &MaintenanceTask,
     limits: &MaintenanceLimits,
+    progress: &Progress,
 ) -> ApiResult<JobOutcome> {
     validate(task)?;
     match task {
         MaintenanceTask::Compact { .. } => {
-            let compaction = CompactionBuilder::new(catalog, ident.clone())
-                .with_config(Arc::new(compaction_config(task, limits)))
-                .with_catalog_name(catalog_name.to_owned())
-                .build();
-            let result = compaction.compact().await.map_err(compaction_error)?;
-            Ok(match result {
-                None => JobOutcome::Compact {
-                    rewrote: false,
-                    input_data_files: 0,
-                    input_delete_files: 0,
-                    input_bytes: 0,
-                    output_files: 0,
-                    output_bytes: 0,
-                    snapshot_id: None,
-                },
-                Some(result) => {
-                    let stats = &result.stats;
-                    JobOutcome::Compact {
-                        rewrote: true,
-                        input_data_files: stats.input_data_file_count as u64,
-                        input_delete_files: (stats.input_position_delete_file_count
-                            + stats.input_equality_delete_file_count)
-                            as u64,
-                        input_bytes: stats.input_total_bytes,
-                        output_files: stats.output_files_count as u64,
-                        output_bytes: stats.output_total_bytes,
-                        snapshot_id: result
-                            .table
-                            .as_ref()
-                            .and_then(|table| table.metadata().current_snapshot_id())
-                            .map(|id| id.to_string()),
-                    }
-                }
-            })
+            crate::compaction::run(catalog, catalog_name, ident, task, limits, progress).await
         }
         MaintenanceTask::ExpireSnapshots {
             older_than_days,
@@ -295,60 +267,6 @@ pub async fn run(
 
 fn cutoff_ms(older_than_days: u32) -> i64 {
     chrono::Utc::now().timestamp_millis() - i64::from(older_than_days) * DAY_MS
-}
-
-fn compaction_config(task: &MaintenanceTask, limits: &MaintenanceLimits) -> CompactionConfig {
-    let MaintenanceTask::Compact {
-        strategy,
-        target_file_size_mb,
-        small_file_threshold_mb,
-        min_delete_files,
-    } = task
-    else {
-        unreachable!("compaction_config is only called for compaction")
-    };
-    let target = u64::from(target_file_size_mb.unwrap_or(512)) * MIB;
-    let small = u64::from(small_file_threshold_mb.unwrap_or(32)) * MIB;
-    let bin_pack = GroupingStrategy::BinPack(BinPackConfig::default());
-    let planning = match strategy {
-        CompactionStrategy::Auto => CompactionPlanningConfig::Auto(AutoCompactionConfig {
-            target_file_size_bytes: target,
-            small_file_threshold_bytes: small,
-            min_delete_file_count_threshold: min_delete_files.unwrap_or(128) as usize,
-            grouping_strategy: bin_pack,
-            ..Default::default()
-        }),
-        CompactionStrategy::SmallFiles => CompactionPlanningConfig::SmallFiles(SmallFilesConfig {
-            target_file_size_bytes: target,
-            small_file_threshold_bytes: small,
-            grouping_strategy: bin_pack,
-            ..Default::default()
-        }),
-        CompactionStrategy::FilesWithDeletes => {
-            CompactionPlanningConfig::FilesWithDeletes(FilesWithDeletesConfig {
-                target_file_size_bytes: target,
-                min_delete_file_count_threshold: min_delete_files.unwrap_or(1).max(1) as usize,
-                grouping_strategy: bin_pack,
-                ..Default::default()
-            })
-        }
-        CompactionStrategy::Full => CompactionPlanningConfig::Full(FullCompactionConfig {
-            target_file_size_bytes: target,
-            grouping_strategy: bin_pack,
-            ..Default::default()
-        }),
-    };
-    let execution = CompactionExecutionConfig {
-        target_file_size_bytes: target,
-        max_memory_bytes: Some(limits.compaction_memory_bytes),
-        spill_dir: Some(std::env::temp_dir().join("bergpilot-spill")),
-        ..Default::default()
-    };
-    CompactionConfig::new(planning, execution)
-}
-
-fn compaction_error(error: iceberg_compaction_core::CompactionError) -> ApiError {
-    ApiError::Upstream(format!("compaction failed: {error}"))
 }
 
 /// Data and delete manifests of the current snapshot.
@@ -529,25 +447,5 @@ mod tests {
             })
             .is_err()
         );
-    }
-
-    #[test]
-    fn maps_compaction_settings() {
-        let task = MaintenanceTask::Compact {
-            strategy: CompactionStrategy::SmallFiles,
-            target_file_size_mb: Some(128),
-            small_file_threshold_mb: Some(16),
-            min_delete_files: None,
-        };
-        let config = compaction_config(&task, &MaintenanceLimits::default());
-        assert_eq!(config.planning.target_file_size_bytes(), 128 * MIB);
-        assert_eq!(config.execution.target_file_size_bytes, 128 * MIB);
-        assert!(matches!(
-            config.planning,
-            CompactionPlanningConfig::SmallFiles(SmallFilesConfig {
-                small_file_threshold_bytes,
-                ..
-            }) if small_file_threshold_bytes == 16 * MIB
-        ));
     }
 }

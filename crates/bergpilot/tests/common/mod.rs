@@ -3,14 +3,19 @@
 
 #![allow(dead_code)]
 
+pub mod racing;
+pub mod upsert;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
+use iceberg::io::StorageFactory;
 use iceberg::spec::{NestedField, PrimitiveType, Schema, Transform, Type, UnboundPartitionSpec};
 use iceberg::{Catalog, CatalogBuilder, NamespaceIdent, TableCreation};
 use iceberg_catalog_sql::SqlCatalogBuilder;
@@ -34,25 +39,24 @@ impl LocalCatalog {
         let db_uri = format!("sqlite://{}?mode=rwc", dir.join("catalog.db").display());
         let warehouse_dir = dir.join("warehouse");
         let warehouse = format!("file://{}", warehouse_dir.display());
-        let catalog: Arc<dyn Catalog> = Arc::new(
-            SqlCatalogBuilder::default()
-                .with_storage_factory(Arc::new(OpenDalResolvingStorageFactory::new()))
-                .load(
-                    STORED_CATALOG_NAME,
-                    HashMap::from([
-                        ("uri".to_owned(), db_uri.clone()),
-                        ("warehouse".to_owned(), warehouse.clone()),
-                    ]),
-                )
-                .await
-                .unwrap(),
-        );
+        let catalog = sql_client(
+            &db_uri,
+            &warehouse,
+            Arc::new(OpenDalResolvingStorageFactory::new()),
+        )
+        .await;
         Self {
             db_uri,
             warehouse,
             warehouse_dir,
             catalog,
         }
+    }
+
+    /// Another client of the same catalog, reading and writing files
+    /// through `storage`.
+    pub async fn client(&self, storage: Arc<dyn StorageFactory>) -> Arc<dyn Catalog> {
+        sql_client(&self.db_uri, &self.warehouse, storage).await
     }
 
     /// The JSON body that registers this catalog in BergPilot as `name`.
@@ -143,6 +147,26 @@ impl LocalCatalog {
     }
 }
 
+async fn sql_client(
+    db_uri: &str,
+    warehouse: &str,
+    storage: Arc<dyn StorageFactory>,
+) -> Arc<dyn Catalog> {
+    Arc::new(
+        SqlCatalogBuilder::default()
+            .with_storage_factory(storage)
+            .load(
+                STORED_CATALOG_NAME,
+                HashMap::from([
+                    ("uri".to_owned(), db_uri.to_owned()),
+                    ("warehouse".to_owned(), warehouse.to_owned()),
+                ]),
+            )
+            .await
+            .unwrap(),
+    )
+}
+
 pub async fn call(
     router: &Router,
     method: &str,
@@ -168,4 +192,20 @@ pub async fn call(
         serde_json::from_slice(&bytes).unwrap_or_else(|_| json!(String::from_utf8_lossy(&bytes)))
     };
     (status, value)
+}
+
+/// Submit a job and wait for it to finish successfully.
+pub async fn run_job(router: &Router, body: Value) -> Value {
+    let (status, job) = call(router, "POST", "/api/jobs", Some(body)).await;
+    assert_eq!(status, StatusCode::CREATED, "{job}");
+    let id = job["id"].as_i64().unwrap();
+    for _ in 0..600 {
+        let (_, job) = call(router, "GET", &format!("/api/jobs/{id}"), None).await;
+        match job["status"].as_str().unwrap() {
+            "succeeded" => return job,
+            "failed" | "cancelled" => panic!("job did not succeed: {job}"),
+            _ => tokio::time::sleep(Duration::from_millis(100)).await,
+        }
+    }
+    panic!("job {id} did not finish in time");
 }

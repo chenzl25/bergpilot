@@ -18,11 +18,13 @@ use sqlx::{Row, SqlitePool};
 use tokio::sync::{Mutex, Notify};
 use tokio::task::AbortHandle;
 
-use crate::catalogs::CatalogRegistry;
+use crate::catalogs::{self, CatalogRegistry};
 use crate::error::{ApiError, ApiResult};
-use crate::maintenance::{self, MaintenanceLimits};
+use crate::io_counter::{CountingStorageFactory, IoCounter};
+use crate::maintenance::{self, MaintenanceLimits, Progress};
 use crate::types::{
-    JobInfo, JobOutcome, JobStatus, MaintenanceTask, ScheduleInfo, ScheduleInput, TableRef,
+    JobInfo, JobOutcome, JobProgress, JobStatus, MaintenanceTask, ScheduleInfo, ScheduleInput,
+    TableRef,
 };
 
 const DISPATCH_INTERVAL: Duration = Duration::from_secs(2);
@@ -40,6 +42,8 @@ pub struct Jobs {
     limits: MaintenanceLimits,
     wake: Arc<Notify>,
     running: Arc<Mutex<HashMap<i64, Running>>>,
+    /// The latest progress report of each running job that reports one.
+    progress: Arc<std::sync::Mutex<HashMap<i64, JobProgress>>>,
 }
 
 struct Running {
@@ -63,6 +67,7 @@ impl Jobs {
             limits,
             wake: Arc::new(Notify::new()),
             running: Arc::default(),
+            progress: Arc::default(),
         }
     }
 
@@ -137,7 +142,7 @@ impl Jobs {
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| ApiError::NotFound(format!("job {id} does not exist")))?;
-        decode_job(&row)
+        Ok(self.with_progress(decode_job(&row)?))
     }
 
     pub async fn list(&self, filter: &JobFilter) -> ApiResult<Vec<JobInfo>> {
@@ -166,7 +171,23 @@ impl Jobs {
                 .await?
             }
         };
-        rows.iter().map(decode_job).collect()
+        rows.iter()
+            .map(|row| Ok(self.with_progress(decode_job(row)?)))
+            .collect()
+    }
+
+    fn with_progress(&self, mut job: JobInfo) -> JobInfo {
+        if job.status == JobStatus::Running {
+            job.progress = self.progress_map().get(&job.id).cloned();
+        }
+        job
+    }
+
+    fn progress_map(&self) -> std::sync::MutexGuard<'_, HashMap<i64, JobProgress>> {
+        // A report is a plain value; a panic elsewhere cannot leave one torn.
+        self.progress
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
     }
 
     /// Cancel a queued job, or stop a running one. A stopped compaction may
@@ -184,6 +205,7 @@ impl Jobs {
             && let Some(running) = self.running.lock().await.remove(&id)
         {
             running.abort.abort();
+            self.progress_map().remove(&id);
             sqlx::query(
                 "update jobs set status = 'cancelled', finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
                  error = 'Stopped by the user; files written so far may remain as orphans' \
@@ -249,6 +271,7 @@ impl Jobs {
         let id = job.id;
         tracing::info!(job = id, kind = job.task.kind(), table = %job.target.table, "job started");
         let result = self.run_task(&job).await;
+        self.progress_map().remove(&id);
         // A cancelled job was already removed from `running` and recorded.
         if self.running.lock().await.remove(&id).is_none() {
             return;
@@ -283,12 +306,38 @@ impl Jobs {
             NamespaceIdent::from_vec(job.target.namespace.clone())?,
             job.target.table.clone(),
         );
+        // A compaction gets its own client whose storage counts the bytes
+        // it reads, so it can report progress through its input files.
+        let (catalog, io) = match job.task {
+            MaintenanceTask::Compact { .. } => {
+                let io = Arc::new(IoCounter::default());
+                let storage = Arc::new(CountingStorageFactory::new(
+                    catalogs::default_storage(),
+                    io.clone(),
+                ));
+                let catalog = catalogs::connect_with_storage(&connected.record, storage).await?;
+                (catalog, Some(io))
+            }
+            _ => (connected.catalog, None),
+        };
+        let reports = self.progress.clone();
+        let id = job.id;
+        let progress = Progress::new(
+            move |progress| {
+                reports
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner())
+                    .insert(id, progress);
+            },
+            io,
+        );
         maintenance::run(
-            connected.catalog,
+            catalog,
             &connected.record.name,
             &ident,
             &job.task,
             &self.limits,
+            &progress,
         )
         .await
     }
@@ -508,6 +557,7 @@ fn decode_job(row: &sqlx::sqlite::SqliteRow) -> ApiResult<JobInfo> {
         finished_at: row.try_get("finished_at")?,
         outcome: outcome.as_deref().map(parse_json).transpose()?,
         error: row.try_get("error")?,
+        progress: None,
     })
 }
 

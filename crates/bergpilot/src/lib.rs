@@ -5,8 +5,10 @@
 
 pub mod api;
 pub mod catalogs;
+pub mod compaction;
 pub mod error;
 pub mod files;
+pub mod io_counter;
 pub mod jobs;
 pub mod maintenance;
 pub mod metadata;

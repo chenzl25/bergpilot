@@ -484,6 +484,52 @@ pub struct JobInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub error: Option<String>,
+    /// How far a running job has got, when it reports progress.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub progress: Option<JobProgress>,
+}
+
+/// The stage a running job is in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum JobPhase {
+    Planning,
+    Rewriting,
+    Committing,
+}
+
+/// Progress of a running compaction. Files are the input data files; bytes
+/// count what has been read of every input file, data and delete.
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct JobProgress {
+    pub phase: JobPhase,
+    #[ts(type = "number")]
+    pub files_done: u64,
+    #[ts(type = "number")]
+    pub files_total: u64,
+    #[ts(type = "number")]
+    pub bytes_done: u64,
+    #[ts(type = "number")]
+    pub bytes_total: u64,
+    #[ts(type = "number")]
+    pub bytes_written: u64,
+}
+
+impl JobProgress {
+    /// A phase that has not counted anything yet.
+    pub fn starting(phase: JobPhase) -> Self {
+        Self {
+            phase,
+            files_done: 0,
+            files_total: 0,
+            bytes_done: 0,
+            bytes_total: 0,
+            bytes_written: 0,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, TS)]
