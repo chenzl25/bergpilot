@@ -100,8 +100,9 @@ impl FileStatsCache {
 /// Totals of the current snapshot.
 ///
 /// Snapshot summaries carry the same totals, but they can be wrong:
-/// iceberg-rust leaves the delete files a rewrite drops out of the summary,
-/// and every later commit adds to the wrong totals. The manifest list counts
+/// iceberg-rust leaves the delete files a rewrite drops out of the summary
+/// (risingwavelabs/iceberg-rust#257), and every later commit adds to the
+/// wrong totals. The manifest list counts
 /// the files of each manifest, so one small read tells whether the summary
 /// still holds; when it does not, the totals come from the manifests.
 pub async fn current_totals(table: &Table, cache: &FileStatsCache) -> ApiResult<CurrentTotals> {

@@ -6,12 +6,11 @@
 //! RisingWave or Flink:
 //!
 //! - It does not look for position deletes added to the data files it
-//!   rewrites, so the rewritten files bring those rows back.
+//!   rewrites, so the rewritten files bring those rows back
+//!   (nimtable/iceberg-compaction#198, risingwavelabs/iceberg-rust#258).
 //! - It copies the custom summary properties of the snapshot it started
 //!   from, so the new snapshot can claim an older RisingWave epoch or Flink
-//!   checkpoint than its parent.
-//! - It rebuilds the commit from scratch on every retry, so against a table
-//!   that commits every few seconds it may never get through.
+//!   checkpoint than its parent (nimtable/iceberg-compaction#197).
 //!
 //! Here the commit is one transaction. Its retries rebase onto the latest
 //! snapshot and reuse the manifests already written, and the catalog it

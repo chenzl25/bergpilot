@@ -26,8 +26,9 @@ const QUERY_SLOTS: usize = 2;
 /// delete files that apply to a data file into one predicate, one tree level
 /// per file, and walks it recursively. RisingWave's upsert sinks write a few
 /// such files per commit, so an uncompacted table can need deep stacks; 2 MiB
-/// overflows at a few hundred files in a debug build. Stacks are reserved,
-/// not committed, so the size costs nothing until a thread uses it.
+/// overflows at a few hundred files in a debug build
+/// (risingwavelabs/iceberg-rust#256). Stacks are reserved, not committed, so
+/// the size costs nothing until a thread uses it.
 pub const THREAD_STACK_BYTES: usize = 64 * 1024 * 1024;
 
 /// The runtime BergPilot runs on.
