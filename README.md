@@ -8,7 +8,7 @@ Observability and maintenance for Apache Iceberg™ tables, in a single Rust ser
 
 ## What it does
 
-- **Browse** catalogs, nested namespaces and tables. Namespace pages summarize every table and point
+- **Browse** catalogs, nested namespaces and tables, or jump to any table with ⌘K. Namespace pages summarize every table and point
   out the ones worth a look (many small files, delete files, long snapshot histories).
 - **Inspect a table:** schema, partitioning and properties; snapshot history with a trend chart of
   records, files and size; files by size for any snapshot; a per-partition breakdown; the first rows.
@@ -72,7 +72,7 @@ older version as `prod.sales."orders@<snapshot id>"` or `"orders@<branch or tag>
   metadata, scans, DataFusion integration and maintenance actions.
 - [nimtable/iceberg-compaction](https://github.com/nimtable/iceberg-compaction): data-file compaction.
 - [Apache DataFusion](https://datafusion.apache.org/), [axum](https://github.com/tokio-rs/axum),
-  React and Vite.
+  React, Vite, Tailwind CSS and [shadcn/ui](https://ui.shadcn.com).
 
 The Iceberg crates are git dependencies pinned to a revision, so BergPilot is not published to
 crates.io. BergPilot is inspired by [Nimtable](https://github.com/nimtable/nimtable).

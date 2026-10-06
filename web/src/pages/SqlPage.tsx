@@ -1,14 +1,29 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
-import CodeMirror, { keymap, Prec } from "@uiw/react-codemirror";
+import CodeMirror, { EditorView, keymap, Prec } from "@uiw/react-codemirror";
 import { sql as sqlLanguage } from "@codemirror/lang-sql";
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { tags } from "@lezer/highlight";
+import { History, Play, SquareTerminal, TriangleAlert } from "lucide-react";
 import { useSearchParams } from "react-router";
 
-import { api } from "../api/client";
-import type { CatalogNames } from "../api/generated/CatalogNames";
-import type { QueryResult } from "../api/generated/QueryResult";
-import { errorMessage } from "../components/Layout";
-import { formatNumber } from "../format";
+import { api } from "@/api/client";
+import type { CatalogNames } from "@/api/generated/CatalogNames";
+import { Results } from "@/components/DataGrid";
+import { Page, PageHeader } from "@/components/page";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Kbd, KbdGroup } from "@/components/ui/kbd";
+import { Spinner } from "@/components/ui/spinner";
+import { errorMessage } from "@/lib/errors";
 
 const STORAGE_KEY = "bergpilot.sql";
 const HISTORY_KEY = "bergpilot.sql-history";
@@ -28,6 +43,7 @@ function remember(statement: string): string[] {
   localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
   return history;
 }
+
 const DEFAULT_SQL = `-- Tables are named catalog.namespace.table.
 -- Metadata tables: catalog.namespace."table$snapshots", $history, $refs,
 -- $manifests, $files and $partitions. Time travel: "table@<snapshot id>"
@@ -37,8 +53,7 @@ SELECT 1 AS ok`;
 type SqlSchema = { [name: string]: SqlSchema | readonly string[] };
 
 const PLAIN_IDENTIFIER = /^[a-z_][a-z0-9_]*$/;
-const quoteIdentifier = (name: string) =>
-  PLAIN_IDENTIFIER.test(name) ? name : `"${name.replace(/"/g, '""')}"`;
+const quoteIdentifier = (name: string) => (PLAIN_IDENTIFIER.test(name) ? name : `"${name.replace(/"/g, '""')}"`);
 
 /**
  * catalog → namespace → table, the shape @codemirror/lang-sql completes.
@@ -59,6 +74,53 @@ function completionSchema(catalogs: { name: string; names?: CatalogNames }[]): S
   }
   return schema;
 }
+
+// Editor colors come from the app's CSS variables, so one theme serves light and dark.
+const editorTheme = EditorView.theme({
+  "&": { backgroundColor: "transparent", color: "var(--foreground)", fontSize: "13px", height: "100%" },
+  "&.cm-focused": { outline: "none" },
+  ".cm-scroller": { fontFamily: "var(--font-mono)", lineHeight: "1.65" },
+  ".cm-content": { caretColor: "var(--primary)", padding: "10px 0" },
+  ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--primary)" },
+  ".cm-gutters": {
+    backgroundColor: "transparent",
+    color: "var(--muted-foreground)",
+    border: "none",
+    borderRight: "1px solid var(--border)",
+  },
+  ".cm-activeLine": { backgroundColor: "color-mix(in oklch, var(--accent) 45%, transparent)" },
+  ".cm-activeLineGutter": { backgroundColor: "transparent", color: "var(--foreground)" },
+  "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, ::selection": {
+    backgroundColor: "color-mix(in oklch, var(--primary) 24%, transparent) !important",
+  },
+  ".cm-matchingBracket": { backgroundColor: "color-mix(in oklch, var(--primary) 18%, transparent)", outline: "none" },
+  ".cm-tooltip": {
+    backgroundColor: "var(--popover)",
+    color: "var(--popover-foreground)",
+    border: "1px solid var(--border)",
+    borderRadius: "8px",
+    overflow: "hidden",
+    boxShadow: "0 8px 24px rgb(0 0 0 / 0.12)",
+  },
+  ".cm-tooltip-autocomplete > ul": { fontFamily: "var(--font-mono)", fontSize: "12.5px" },
+  ".cm-tooltip-autocomplete > ul > li[aria-selected]": {
+    backgroundColor: "var(--accent)",
+    color: "var(--accent-foreground)",
+  },
+  ".cm-completionDetail": { color: "var(--muted-foreground)" },
+});
+
+const highlight = HighlightStyle.define([
+  { tag: [tags.keyword, tags.operatorKeyword], color: "var(--primary)", fontWeight: "500" },
+  { tag: [tags.string, tags.special(tags.string)], color: "var(--chart-2)" },
+  { tag: [tags.number, tags.bool, tags.null], color: "var(--chart-3)" },
+  { tag: tags.comment, color: "var(--muted-foreground)", fontStyle: "italic" },
+  { tag: [tags.typeName, tags.standard(tags.name)], color: "var(--chart-4)" },
+  { tag: [tags.special(tags.name), tags.quote], color: "var(--chart-2)" },
+  { tag: tags.punctuation, color: "var(--muted-foreground)" },
+]);
+
+const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
 export function SqlPage() {
   const [search, setSearch] = useSearchParams();
@@ -108,6 +170,8 @@ export function SqlPage() {
 
   const extensions = useMemo(
     () => [
+      editorTheme,
+      syntaxHighlighting(highlight),
       sqlLanguage({ schema }),
       Prec.highest(
         keymap.of([
@@ -125,97 +189,71 @@ export function SqlPage() {
   );
 
   return (
-    <div className="page sql-page">
-      <div className="page-header">
-        <h1>SQL</h1>
-        <div className="actions">
-          <span className="muted small">Read-only · ⌘/Ctrl + Enter to run</span>
-          <button className="primary" onClick={execute} disabled={run.isPending}>
-            {run.isPending ? "Running…" : "Run"}
-          </button>
-        </div>
-      </div>
-      <div className="editor">
-        <CodeMirror value={text} height="220px" extensions={extensions} onChange={setText} />
-      </div>
-      {run.isError && <div className="notice bad mono">{errorMessage(run.error)}</div>}
-      {run.data && <Results result={run.data} />}
-      {history.length > 0 && (
-        <details className="history">
-          <summary>Recent queries ({history.length})</summary>
-          <ul>
-            {history.map((statement) => (
-              <li key={statement}>
-                <button className="history-item mono" onClick={() => setText(statement)} title="Put in the editor">
-                  {statement}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
-    </div>
-  );
-}
-
-/** RFC 4180 CSV; NULL becomes an empty field. */
-function toCsv(result: QueryResult): string {
-  const field = (value: string | null) =>
-    value === null ? "" : /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
-  const lines = [result.columns.map((column) => field(column.name)).join(",")];
-  for (const row of result.rows) lines.push(row.map(field).join(","));
-  return lines.join("\r\n") + "\r\n";
-}
-
-function downloadCsv(result: QueryResult) {
-  const blob = new Blob([toCsv(result)], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `bergpilot-${new Date().toISOString().replace(/[:.]/g, "-")}.csv`;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-export function Results({ result }: { result: QueryResult }) {
-  return (
-    <div className="results">
-      <div className="results-meta muted small">
-        {formatNumber(result.rows.length)} row{result.rows.length === 1 ? "" : "s"}
-        {result.truncated && " (more rows exist; showing the first ones)"} · {formatNumber(result.elapsed_ms)} ms
-        {result.rows.length > 0 && (
-          <button className="link" onClick={() => downloadCsv(result)}>
-            Download CSV
-          </button>
-        )}
-      </div>
-      <div className="results-scroll">
-        <table className="grid results-grid">
-          <thead>
-            <tr>
-              <th className="row-number">#</th>
-              {result.columns.map((column, index) => (
-                <th key={index} title={column.type}>
-                  {column.name}
-                  <span className="column-type">{column.type}</span>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {result.rows.map((row, rowIndex) => (
-              <tr key={rowIndex}>
-                <td className="row-number">{rowIndex + 1}</td>
-                {row.map((value, index) => (
-                  <td key={index} className="mono">
-                    {value === null ? <span className="null">NULL</span> : value}
-                  </td>
+    <Page>
+      <PageHeader
+        icon={SquareTerminal}
+        title="SQL"
+        meta="Read-only queries through Apache DataFusion. Tables are named catalog.namespace.table."
+        actions={
+          <>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" disabled={history.length === 0}>
+                  <History />
+                  History
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-[min(560px,90vw)]">
+                <DropdownMenuLabel>Recent queries</DropdownMenuLabel>
+                {history.map((statement) => (
+                  <DropdownMenuItem key={statement} onSelect={() => setText(statement)} title={statement}>
+                    <span className="truncate font-mono text-xs">{statement.replace(/\s+/g, " ")}</span>
+                  </DropdownMenuItem>
                 ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-muted-foreground"
+                  onSelect={() => {
+                    localStorage.removeItem(HISTORY_KEY);
+                    setHistory([]);
+                  }}
+                >
+                  Clear history
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button onClick={execute} disabled={run.isPending}>
+              {run.isPending ? <Spinner /> : <Play />}
+              {run.isPending ? "Running…" : "Run"}
+              <KbdGroup className="ml-1 hidden sm:inline-flex">
+                <Kbd className="bg-primary-foreground/15 text-primary-foreground">{isMac ? "⌘" : "Ctrl"}</Kbd>
+                <Kbd className="bg-primary-foreground/15 text-primary-foreground">↵</Kbd>
+              </KbdGroup>
+            </Button>
+          </>
+        }
+      />
+      <div className="h-64 min-h-32 resize-y overflow-hidden rounded-xl border bg-card shadow-xs focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/20">
+        <CodeMirror
+          value={text}
+          height="100%"
+          className="h-full"
+          theme="none"
+          extensions={extensions}
+          onChange={setText}
+          aria-label="SQL editor"
+        />
       </div>
-    </div>
+      {run.isError && (
+        <Alert variant="destructive">
+          <TriangleAlert />
+          <AlertTitle>Query failed</AlertTitle>
+          <AlertDescription className="font-mono text-xs break-words whitespace-pre-wrap">
+            {errorMessage(run.error)}
+          </AlertDescription>
+        </Alert>
+      )}
+      {run.data && !run.isPending && <Results result={run.data} />}
+    </Page>
   );
 }

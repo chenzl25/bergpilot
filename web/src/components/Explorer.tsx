@@ -1,10 +1,16 @@
-import { useEffect, useState } from "react";
-import { useQueries, useQuery } from "@tanstack/react-query";
-import { Link, NavLink, useLocation } from "react-router";
+// Catalog → namespace → table tree in the sidebar. Levels load when expanded.
 
-import { api } from "../api/client";
-import type { CatalogSummary } from "../api/generated/CatalogSummary";
-import { namespacePath, splatSegments, tablePath } from "../format";
+import { type ComponentType, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { ChevronRight, Database, Folder, FolderOpen, Table2 } from "lucide-react";
+import { NavLink, useLocation } from "react-router";
+
+import { api } from "@/api/client";
+import type { CatalogSummary } from "@/api/generated/CatalogSummary";
+import { Skeleton } from "@/components/ui/skeleton";
+import { namespacePath, splatSegments, tablePath } from "@/format";
+import { errorMessage } from "@/lib/errors";
+import { cn } from "@/lib/utils";
 
 /** The catalog and namespace the current page is about, if any. */
 function useRouteTarget(): { catalogId: number; namespace: string[] } | null {
@@ -26,90 +32,18 @@ function useOpenOnPath(onPath: boolean) {
   }, [onPath]);
   return [open, setOpen] as const;
 }
-import { errorMessage } from "./Layout";
 
-/** Catalog → namespace → table tree. Levels load when expanded. */
 export function Explorer() {
   const catalogs = useQuery({ queryKey: ["catalogs"], queryFn: api.listCatalogs });
-  const [search, setSearch] = useState("");
-
+  if (catalogs.isPending) return <TreeSkeleton depth={0} />;
+  if (catalogs.isError) return <TreeNote depth={0} error>{errorMessage(catalogs.error)}</TreeNote>;
+  if (catalogs.data.length === 0) return <TreeNote depth={0}>No catalogs yet.</TreeNote>;
   return (
-    <div className="explorer">
-      <div className="explorer-header">
-        <span>Explorer</span>
-        <Link to="/catalogs/new" className="icon-link" title="Add a catalog">
-          + Add
-        </Link>
-      </div>
-      {(catalogs.data?.length ?? 0) > 0 && (
-        <div className="explorer-search">
-          <input
-            type="search"
-            value={search}
-            placeholder="Find a table"
-            onChange={(event) => setSearch(event.target.value)}
-            onKeyDown={(event) => event.key === "Escape" && setSearch("")}
-          />
-        </div>
-      )}
-      {search.trim() && catalogs.data && (
-        <SearchResults catalogs={catalogs.data} term={search.trim().toLowerCase()} onPick={() => setSearch("")} />
-      )}
-      {catalogs.isPending && <p className="muted pad">Loading…</p>}
-      {catalogs.isError && <p className="error pad">{errorMessage(catalogs.error)}</p>}
-      {catalogs.data?.length === 0 && <p className="muted pad">No catalogs yet.</p>}
-      <ul className="tree">
-        {catalogs.data?.map((catalog) => (
-          <CatalogNode key={catalog.id} catalog={catalog} />
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-const MAX_RESULTS = 30;
-
-/** Table names matching `term` across catalogs, from the names API. */
-function SearchResults(props: { catalogs: CatalogSummary[]; term: string; onPick: () => void }) {
-  const names = useQueries({
-    queries: props.catalogs.map((catalog) => ({
-      queryKey: ["names", catalog.id],
-      queryFn: () => api.names(catalog.id),
-      staleTime: 5 * 60_000,
-      retry: false,
-    })),
-  });
-  const matches: { catalog: CatalogSummary; namespace: string[]; table: string }[] = [];
-  props.catalogs.forEach((catalog, index) => {
-    for (const entry of names[index]?.data?.namespaces ?? []) {
-      for (const table of entry.tables) {
-        const full = `${entry.namespace.join(".")}.${table}`.toLowerCase();
-        if (full.includes(props.term)) matches.push({ catalog, namespace: entry.namespace, table });
-      }
-    }
-  });
-  const loading = names.some((result) => result.isPending);
-  return (
-    <div className="search-results">
-      {matches.slice(0, MAX_RESULTS).map((match) => (
-        <Link
-          key={`${match.catalog.id}/${match.namespace.join("\u001f")}/${match.table}`}
-          className="search-result"
-          to={tablePath(match.catalog.id, match.namespace, match.table)}
-          onClick={props.onPick}
-        >
-          <span className="tree-icon table-icon" />
-          <span>
-            {match.table}
-            <span className="muted small"> {match.catalog.name}.{match.namespace.join(".")}</span>
-          </span>
-        </Link>
+    <ul className="flex flex-col gap-px" aria-label="Explorer">
+      {catalogs.data.map((catalog) => (
+        <CatalogNode key={catalog.id} catalog={catalog} />
       ))}
-      {matches.length === 0 && <p className="muted tree-note">{loading ? "Searching…" : "No tables match."}</p>}
-      {matches.length > MAX_RESULTS && (
-        <p className="muted tree-note">{matches.length - MAX_RESULTS} more; type more of the name.</p>
-      )}
-    </div>
+    </ul>
   );
 }
 
@@ -119,18 +53,19 @@ function CatalogNode({ catalog }: { catalog: CatalogSummary }) {
   return (
     <li>
       <TreeRow
+        depth={0}
         open={open}
         onToggle={() => setOpen(!open)}
         label={catalog.name}
-        kind="catalog"
+        icon={Database}
         to={`/catalogs/${catalog.id}`}
       />
-      {open && <NamespaceChildren catalogId={catalog.id} parent={[]} />}
+      {open && <NamespaceChildren catalogId={catalog.id} parent={[]} depth={1} />}
     </li>
   );
 }
 
-function NamespaceChildren({ catalogId, parent }: { catalogId: number; parent: string[] }) {
+function NamespaceChildren({ catalogId, parent, depth }: { catalogId: number; parent: string[]; depth: number }) {
   const namespaces = useQuery({
     queryKey: ["namespaces", catalogId, parent],
     queryFn: () => api.namespaces(catalogId, parent),
@@ -141,27 +76,28 @@ function NamespaceChildren({ catalogId, parent }: { catalogId: number; parent: s
     enabled: parent.length > 0,
   });
 
-  if (namespaces.isPending || (parent.length > 0 && tables.isPending)) {
-    return <p className="muted tree-note">Loading…</p>;
-  }
+  if (namespaces.isPending || (parent.length > 0 && tables.isPending)) return <TreeSkeleton depth={depth} />;
   const error = namespaces.error ?? tables.error;
-  if (error) return <p className="error tree-note">{errorMessage(error)}</p>;
+  if (error) return <TreeNote depth={depth} error>{errorMessage(error)}</TreeNote>;
 
   const childNamespaces = namespaces.data?.namespaces ?? [];
   const tableNames = tables.data?.tables ?? [];
-  if (childNamespaces.length === 0 && tableNames.length === 0) {
-    return <p className="muted tree-note">Empty</p>;
-  }
+  if (childNamespaces.length === 0 && tableNames.length === 0) return <TreeNote depth={depth}>Empty</TreeNote>;
   return (
-    <ul className="tree">
+    <ul className="flex flex-col gap-px">
       {childNamespaces.map((levels) => (
-        <NamespaceNode key={levels.join("\u001f")} catalogId={catalogId} levels={levels} />
+        <NamespaceNode key={levels.join("\u001f")} catalogId={catalogId} levels={levels} depth={depth} />
       ))}
       {tableNames.map((name) => (
         <li key={name}>
-          <NavLink className="tree-row tree-leaf" to={tablePath(catalogId, parent, name)}>
-            <span className="tree-icon table-icon" />
-            {name}
+          <NavLink
+            to={tablePath(catalogId, parent, name)}
+            className={({ isActive }) => rowClass(isActive)}
+            style={indent(depth)}
+          >
+            <span className="size-5 shrink-0" />
+            <Table2 className="size-4 shrink-0 text-muted-foreground" />
+            <span className="truncate">{name}</span>
           </NavLink>
         </li>
       ))}
@@ -169,7 +105,7 @@ function NamespaceChildren({ catalogId, parent }: { catalogId: number; parent: s
   );
 }
 
-function NamespaceNode({ catalogId, levels }: { catalogId: number; levels: string[] }) {
+function NamespaceNode({ catalogId, levels, depth }: { catalogId: number; levels: string[]; depth: number }) {
   const target = useRouteTarget();
   const onPath =
     target?.catalogId === catalogId &&
@@ -179,39 +115,82 @@ function NamespaceNode({ catalogId, levels }: { catalogId: number; levels: strin
   return (
     <li>
       <TreeRow
+        depth={depth}
         open={open}
         onToggle={() => setOpen(!open)}
         label={levels[levels.length - 1]}
-        kind="namespace"
+        icon={open ? FolderOpen : Folder}
         to={namespacePath(catalogId, levels)}
       />
-      {open && <NamespaceChildren catalogId={catalogId} parent={levels} />}
+      {open && <NamespaceChildren catalogId={catalogId} parent={levels} depth={depth + 1} />}
     </li>
+  );
+}
+
+const indent = (depth: number) => ({ paddingLeft: `${4 + depth * 14}px` });
+
+function rowClass(active: boolean) {
+  return cn(
+    "flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-sm text-sidebar-foreground outline-hidden ring-sidebar-ring transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2",
+    active && "bg-sidebar-accent font-medium text-sidebar-accent-foreground",
   );
 }
 
 /** A folder row: the chevron expands it, the name opens its page. */
 function TreeRow(props: {
+  depth: number;
   open: boolean;
   onToggle: () => void;
   label: string;
-  kind: "catalog" | "namespace";
+  icon: ComponentType<{ className?: string }>;
   to: string;
 }) {
   return (
-    <div className="tree-row tree-folder">
+    <div
+      className={cn(
+        rowClass(false),
+        "has-[a[aria-current=page]]:bg-sidebar-accent has-[a[aria-current=page]]:font-medium has-[a[aria-current=page]]:text-sidebar-accent-foreground has-[:focus-visible]:ring-2",
+      )}
+      style={indent(props.depth)}
+    >
       <button
-        className="chevron-button"
+        type="button"
+        className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground outline-hidden hover:bg-sidebar-border/60 hover:text-foreground"
         onClick={props.onToggle}
         aria-expanded={props.open}
         aria-label={`${props.open ? "Collapse" : "Expand"} ${props.label}`}
       >
-        <span className={`chevron ${props.open ? "open" : ""}`}>▸</span>
+        <ChevronRight className={cn("size-3.5 transition-transform", props.open && "rotate-90")} />
       </button>
-      <NavLink className="tree-label" to={props.to} end onClick={() => !props.open && props.onToggle()}>
-        <span className={`tree-icon ${props.kind}-icon`} />
-        {props.label}
+      <NavLink
+        to={props.to}
+        end
+        className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch outline-hidden"
+        onClick={() => !props.open && props.onToggle()}
+      >
+        <props.icon className="size-4 shrink-0 text-muted-foreground" />
+        <span className="truncate">{props.label}</span>
       </NavLink>
+    </div>
+  );
+}
+
+function TreeNote({ depth, error, children }: { depth: number; error?: boolean; children: string }) {
+  return (
+    <p
+      className={cn("py-1 pr-2 text-xs", error ? "text-destructive" : "text-muted-foreground")}
+      style={{ paddingLeft: `${4 + depth * 14 + 26}px` }}
+    >
+      {children}
+    </p>
+  );
+}
+
+function TreeSkeleton({ depth }: { depth: number }) {
+  return (
+    <div className="flex flex-col gap-1.5 py-1 pr-2" style={{ paddingLeft: `${4 + depth * 14 + 26}px` }}>
+      <Skeleton className="h-4 w-3/4" />
+      <Skeleton className="h-4 w-1/2" />
     </div>
   );
 }

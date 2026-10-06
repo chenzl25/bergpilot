@@ -39,13 +39,22 @@ Dependencies point down the table: handlers call modules; modules never call han
 ## Frontend (`web/src`)
 
 - `api/client.ts`: the only place that calls `fetch`; typed with the generated types.
-- `pages/`: one file per route (`main.tsx` lists them). `catalogFields.ts` describes the catalog
-  form for each kind.
-- `components/`: layout, explorer, maintenance tab, job tables, trend chart.
-- `format.ts`, `jobs.ts`: formatting and plain-language descriptions.
+- `pages/`: one file per route (`main.tsx` lists them; the SQL page and its editor load lazily).
+  `catalogFields.ts` describes the catalog form for each kind.
+- `components/`: the app shell (`Layout.tsx`: sidebar, breadcrumbs, token prompt), explorer tree,
+  ⌘K menu, maintenance tab, job tables, trend chart, the virtualized result grid (`DataGrid.tsx`),
+  and shared page parts (`page.tsx`).
+- `components/ui/`: [shadcn/ui](https://ui.shadcn.com) components (Radix primitives, "nova"
+  style). They are our code: edit them freely. Add more with `pnpm dlx shadcn@latest add <name>`
+  (`components.json` holds the settings).
+- `index.css`: Tailwind v4, the color tokens for light and dark, and Geist fonts. Colors are CSS
+  variables (`--primary`, `--chart-1`…); components use them through Tailwind classes, the SQL
+  editor and the trend chart read them directly. `shadcn.css` is copied from the shadcn package.
+- `format.ts`, `jobs.ts`, `health.ts`: formatting, plain-language descriptions, table checks.
 
-Server state lives in TanStack Query; there is no global client store. The access token, recent
-queries and the SQL draft are kept in `localStorage`.
+Server state lives in TanStack Query; there is no global client store. The access token, theme,
+recent queries and the SQL draft are kept in `localStorage`. Changes that finish in the background
+(jobs) are announced with toasts by `useJobWatcher`.
 
 ## Decisions worth knowing
 

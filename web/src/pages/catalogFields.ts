@@ -2,7 +2,10 @@
 // inputs, and which ones are secrets. Property keys are the ones the
 // iceberg-rust catalog builders read.
 
-import type { CatalogKind } from "../api/generated/CatalogKind";
+import type { ComponentType } from "react";
+import { Cloud, Database, Globe, Package } from "lucide-react";
+
+import type { CatalogKind } from "@/api/generated/CatalogKind";
 
 export interface Field {
   key: string;
@@ -22,6 +25,7 @@ export interface AuthMode {
 
 export interface KindLayout {
   label: string;
+  icon: ComponentType<{ className?: string }>;
   description: string;
   connection: Field[];
   /** Mutually exclusive ways to authenticate; the first is the default. */
@@ -64,6 +68,7 @@ const AWS_AUTH: AuthMode[] = [
 
 export const LAYOUTS: Record<CatalogKind, KindLayout> = {
   rest: {
+    icon: Globe,
     label: "REST",
     description: "An Iceberg REST catalog such as Polaris, Lakekeeper, Gravitino, Nessie or Unity.",
     connection: [
@@ -87,6 +92,7 @@ export const LAYOUTS: Record<CatalogKind, KindLayout> = {
     storageNote: "Leave empty when the catalog vends credentials or the environment provides them.",
   },
   glue: {
+    icon: Cloud,
     label: "AWS Glue",
     description: "The AWS Glue Data Catalog. Glue databases are namespaces; there is no nesting.",
     connection: [
@@ -100,6 +106,7 @@ export const LAYOUTS: Record<CatalogKind, KindLayout> = {
     storageNote: "Usually empty: S3 reuses the AWS region and keys above unless set here.",
   },
   s3tables: {
+    icon: Package,
     label: "S3 Tables",
     description: "Amazon S3 Tables. Each table bucket is one catalog.",
     connection: [
@@ -117,6 +124,7 @@ export const LAYOUTS: Record<CatalogKind, KindLayout> = {
     storageNote: "Usually empty: S3 Tables vends storage access.",
   },
   sql: {
+    icon: Database,
     label: "JDBC",
     description:
       "A catalog kept in PostgreSQL, MySQL or SQLite tables, the layout Java's JdbcCatalog uses.",

@@ -1,17 +1,54 @@
 import { Fragment, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import {
+  ChevronRight,
+  Clock,
+  Database,
+  FileStack,
+  Files,
+  FileX,
+  GitBranch,
+  History,
+  Rows3,
+  SquareTerminal,
+  Table2,
+  Tag,
+  TriangleAlert,
+  Wrench,
+} from "lucide-react";
 import { Link, useParams, useSearchParams } from "react-router";
 
-import { api } from "../api/client";
-import type { FileStats } from "../api/generated/FileStats";
-import type { TableDetail } from "../api/generated/TableDetail";
-import { errorMessage } from "../components/Layout";
-import { MaintenanceTab } from "../components/MaintenanceTab";
-import { PropertiesEditor } from "../components/PropertiesEditor";
-import { TrendChart } from "../components/TrendChart";
-import { attention } from "../health";
-import { Results } from "./SqlPage";
-import { formatAge, formatBytes, formatNumber, formatTime, namespacePath, sqlTableName } from "../format";
+import { api } from "@/api/client";
+import type { FileStats } from "@/api/generated/FileStats";
+import type { TableDetail } from "@/api/generated/TableDetail";
+import { Results } from "@/components/DataGrid";
+import { MaintenanceTab } from "@/components/MaintenanceTab";
+import {
+  CopyButton,
+  Dot,
+  ErrorNotice,
+  FactList,
+  Loading,
+  Page,
+  PageHeader,
+  PageSkeleton,
+  Panel,
+  Section,
+  Stat,
+  StatGrid,
+} from "@/components/page";
+import { PropertiesEditor } from "@/components/PropertiesEditor";
+import { OperationBadge, TrendChart } from "@/components/TrendChart";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { formatAge, formatBytes, formatNumber, formatTime, sqlTableName } from "@/format";
+import { attention } from "@/health";
+import { cn } from "@/lib/utils";
 
 const TABS = ["overview", "data", "schema", "snapshots", "files", "maintenance"] as const;
 type Tab = (typeof TABS)[number];
@@ -39,176 +76,284 @@ export function TablePage() {
     enabled: namespace.length > 0 && name !== "",
   });
 
-  if (namespace.length === 0) return <p className="error">Not a table path.</p>;
-  if (table.isPending) return <p className="muted">Loading {name}…</p>;
-  if (table.isError) return <p className="error">{errorMessage(table.error)}</p>;
+  if (namespace.length === 0) {
+    return (
+      <Page>
+        <ErrorNotice error="Not a table path." />
+      </Page>
+    );
+  }
+  if (table.isPending) return <PageSkeleton />;
+  if (table.isError) {
+    return (
+      <Page>
+        <ErrorNotice title={`Cannot load ${name}`} error={table.error} />
+      </Page>
+    );
+  }
   const detail = table.data;
-  const sql = `SELECT * FROM ${sqlTableName(detail.catalog, namespace, name)} LIMIT 100`;
-
-  return (
-    <div className="page">
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <Link to={`/catalogs/${catalogId}`}>{detail.catalog}</Link>
-            {namespace.map((level, index) => (
-              <span key={index}>
-                {" / "}
-                <Link to={namespacePath(catalogId, namespace.slice(0, index + 1))}>{level}</Link>
-              </span>
-            ))}
-          </div>
-          <h1>{name}</h1>
-        </div>
-        <Link className="button secondary" to={`/sql?q=${encodeURIComponent(sql)}`}>
-          Query
-        </Link>
-      </div>
-      <div className="tabs">
-        {TABS.map((item) => (
-          <button
-            key={item}
-            className={item === tab ? "active" : ""}
-            onClick={() => setSearch(item === "overview" ? {} : { tab: item }, { replace: true })}
-          >
-            {TAB_LABELS[item]}
-            {item === "snapshots" && <span className="count">{detail.snapshots.length}</span>}
-          </button>
-        ))}
-      </div>
-      {tab === "overview" && <Overview detail={detail} catalogId={catalogId} />}
-      {tab === "data" && <DataTab sql={`SELECT * FROM ${sqlTableName(detail.catalog, namespace, name)} LIMIT 50`} />}
-      {tab === "schema" && <SchemaTab detail={detail} />}
-      {tab === "snapshots" && <SnapshotsTab detail={detail} />}
-      {tab === "files" && <FilesTab detail={detail} catalogId={catalogId} namespace={namespace} />}
-      {tab === "maintenance" && (
-        <MaintenanceTab target={{ catalog_id: catalogId, namespace, table: name }} detail={detail} />
-      )}
-    </div>
-  );
-}
-
-function Overview({ detail, catalogId }: { detail: TableDetail; catalogId: number }) {
-  const current = detail.snapshots.find((s) => s.snapshot_id === detail.current_snapshot_id);
-  const summary = current?.summary ?? {};
+  const qualified = sqlTableName(detail.catalog, namespace, name);
+  const summary = detail.snapshots.find((s) => s.snapshot_id === detail.current_snapshot_id)?.summary ?? {};
   const notes = attention({
     data_files: Number(summary["total-data-files"] ?? 0),
     data_bytes: Number(summary["total-files-size"] ?? 0),
     delete_files: Number(summary["total-delete-files"] ?? 0),
     snapshots: detail.snapshots.length,
   });
+
   return (
-    <div className="overview">
-      {notes.length > 0 && (
-        <div className="notice attention-notice">
-          Worth a look: {notes.join(", ")}.{" "}
-          <Link to="?tab=maintenance">Maintenance</Link>
-        </div>
-      )}
-      <div className="stats">
-        <Stat label="Records" value={formatNumber(summary["total-records"])} />
-        <Stat label="Data files" value={formatNumber(summary["total-data-files"])} />
-        <Stat
-          label="Data size"
-          value={summary["total-files-size"] ? formatBytes(Number(summary["total-files-size"])) : "—"}
-        />
-        <Stat label="Delete files" value={formatNumber(summary["total-delete-files"])} />
-        <Stat label="Snapshots" value={formatNumber(detail.snapshots.length)} />
-        <Stat label="Last updated" value={formatAge(detail.last_updated_ms)} title={formatTime(detail.last_updated_ms)} />
-      </div>
-      <dl className="facts">
-        <dt>Location</dt>
-        <dd className="mono">{detail.location}</dd>
-        <dt>Metadata file</dt>
-        <dd className="mono">{detail.metadata_location ?? "—"}</dd>
-        <dt>Format version</dt>
-        <dd>v{detail.format_version}</dd>
-        <dt>Table UUID</dt>
-        <dd className="mono">{detail.uuid}</dd>
-        <dt>Current snapshot</dt>
-        <dd className="mono">{detail.current_snapshot_id ?? "None (empty table)"}</dd>
-        <dt>Partitioned by</dt>
-        <dd>
-          {detail.partition_fields.length === 0
-            ? "Not partitioned"
-            : detail.partition_fields.map((f) => `${f.transform}(${f.source})`).join(", ")}
-        </dd>
-        <dt>Sorted by</dt>
-        <dd>
-          {detail.sort_fields.length === 0
-            ? "Unsorted"
-            : detail.sort_fields
-                .map((f) => `${f.transform === "identity" ? f.source : `${f.transform}(${f.source})`} ${f.direction} ${f.null_order}`)
-                .join(", ")}
-        </dd>
-        <dt>Branches and tags</dt>
-        <dd>
-          {detail.refs.length === 0
-            ? "—"
-            : detail.refs.map((r) => (
-                <span key={r.name} className={`badge ${r.kind}`}>
-                  {r.name}
-                </span>
-              ))}
-        </dd>
-      </dl>
-      <PropertiesEditor
-        detail={detail}
-        target={{ catalog_id: catalogId, namespace: detail.namespace, table: detail.name }}
+    <Page>
+      <PageHeader
+        icon={Table2}
+        title={name}
+        meta={
+          <>
+            <span className="inline-flex items-center gap-0.5 font-mono text-xs">
+              {qualified}
+              <CopyButton value={qualified} label="Copy SQL name" />
+            </span>
+            <Badge variant="outline">Iceberg v{detail.format_version}</Badge>
+            <span title={formatTime(detail.last_updated_ms)}>Updated {formatAge(detail.last_updated_ms)}</span>
+            {notes.map((note) => (
+              <Badge key={note} variant="outline" className="border-warning/40 bg-warning/10 text-warning">
+                {note}
+              </Badge>
+            ))}
+          </>
+        }
+        actions={
+          <Button variant="outline" asChild>
+            <Link to={`/sql?q=${encodeURIComponent(`SELECT * FROM ${qualified} LIMIT 100`)}`}>
+              <SquareTerminal />
+              Query
+            </Link>
+          </Button>
+        }
       />
-    </div>
+      <Tabs
+        value={tab}
+        onValueChange={(value) => setSearch(value === "overview" ? {} : { tab: value }, { replace: true })}
+        className="gap-5"
+      >
+        <div className="-mx-4 overflow-x-auto border-b px-4 md:-mx-8 md:px-8">
+          <TabsList variant="line" className="h-10">
+            {TABS.map((item) => (
+              <TabsTrigger key={item} value={item} className="px-2.5">
+                {TAB_LABELS[item]}
+                {item === "snapshots" && (
+                  <span className="rounded-full bg-muted px-1.5 text-[11px] text-muted-foreground tabular-nums">
+                    {detail.snapshots.length}
+                  </span>
+                )}
+                {item === "maintenance" && notes.length > 0 && <Dot className="bg-warning" />}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
+        <TabsContent value="overview">
+          <Overview detail={detail} catalogId={catalogId} notes={notes} />
+        </TabsContent>
+        <TabsContent value="data">
+          <DataTab sql={`SELECT * FROM ${qualified} LIMIT 50`} />
+        </TabsContent>
+        <TabsContent value="schema">
+          <SchemaTab detail={detail} />
+        </TabsContent>
+        <TabsContent value="snapshots">
+          <SnapshotsTab detail={detail} />
+        </TabsContent>
+        <TabsContent value="files">
+          <FilesTab detail={detail} catalogId={catalogId} namespace={namespace} />
+        </TabsContent>
+        <TabsContent value="maintenance">
+          <MaintenanceTab target={{ catalog_id: catalogId, namespace, table: name }} detail={detail} />
+        </TabsContent>
+      </Tabs>
+    </Page>
   );
 }
 
-function Stat({ label, value, title }: { label: string; value: string; title?: string }) {
+function Overview({ detail, catalogId, notes }: { detail: TableDetail; catalogId: number; notes: string[] }) {
+  const current = detail.snapshots.find((s) => s.snapshot_id === detail.current_snapshot_id);
+  const summary = current?.summary ?? {};
+  const deleteFiles = Number(summary["total-delete-files"] ?? 0);
+  const files = Number(summary["total-data-files"] ?? 0);
+  const bytes = Number(summary["total-files-size"] ?? 0);
   return (
-    <div className="stat" title={title}>
-      <div className="stat-value">{value}</div>
-      <div className="stat-label">{label}</div>
+    <div className="flex flex-col gap-6">
+      {notes.length > 0 && (
+        <Alert className="border-warning/40 bg-warning/5">
+          <TriangleAlert className="text-warning" />
+          <AlertTitle>Worth a look: {notes.join(", ")}</AlertTitle>
+          <AlertDescription>The Maintenance tab shows what a compaction or cleanup would change.</AlertDescription>
+          <AlertAction>
+            <Button size="sm" variant="outline" asChild>
+              <Link to="?tab=maintenance">
+                <Wrench />
+                Maintenance
+              </Link>
+            </Button>
+          </AlertAction>
+        </Alert>
+      )}
+      <StatGrid>
+        <Stat icon={Rows3} label="Records" value={formatNumber(summary["total-records"])} />
+        <Stat
+          icon={Files}
+          label="Data files"
+          value={formatNumber(summary["total-data-files"])}
+          hint={files ? `avg ${formatBytes(bytes / files)}` : undefined}
+        />
+        <Stat icon={Database} label="Data size" value={summary["total-files-size"] ? formatBytes(bytes) : "—"} />
+        <Stat
+          icon={FileX}
+          label="Delete files"
+          value={formatNumber(summary["total-delete-files"])}
+          tone={deleteFiles > 0 ? "warning" : undefined}
+        />
+        <Stat icon={History} label="Snapshots" value={formatNumber(detail.snapshots.length)} />
+        <Stat
+          icon={Clock}
+          label="Last updated"
+          value={formatAge(detail.last_updated_ms)}
+          title={formatTime(detail.last_updated_ms)}
+        />
+      </StatGrid>
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Section title="Details">
+          <Panel>
+            <FactList
+              facts={[
+                { label: "Location", value: detail.location, mono: true, copy: detail.location },
+                {
+                  label: "Metadata file",
+                  value: detail.metadata_location ?? "—",
+                  mono: true,
+                  copy: detail.metadata_location,
+                },
+                { label: "Table UUID", value: detail.uuid, mono: true, copy: detail.uuid },
+                {
+                  label: "Current snapshot",
+                  value: detail.current_snapshot_id ?? "None (empty table)",
+                  mono: true,
+                  copy: detail.current_snapshot_id,
+                },
+                {
+                  label: "Partitioned by",
+                  value:
+                    detail.partition_fields.length === 0 ? (
+                      <span className="text-muted-foreground">Not partitioned</span>
+                    ) : (
+                      <span className="flex flex-wrap gap-1">
+                        {detail.partition_fields.map((field) => (
+                          <Badge key={field.name} variant="secondary" className="font-mono">
+                            {field.transform}({field.source})
+                          </Badge>
+                        ))}
+                      </span>
+                    ),
+                },
+                {
+                  label: "Sorted by",
+                  value:
+                    detail.sort_fields.length === 0 ? (
+                      <span className="text-muted-foreground">Unsorted</span>
+                    ) : (
+                      <span className="flex flex-wrap gap-1">
+                        {detail.sort_fields.map((field, index) => (
+                          <Badge key={index} variant="secondary" className="font-mono">
+                            {field.transform === "identity" ? field.source : `${field.transform}(${field.source})`}{" "}
+                            {field.direction} {field.null_order}
+                          </Badge>
+                        ))}
+                      </span>
+                    ),
+                },
+                {
+                  label: "Branches and tags",
+                  value:
+                    detail.refs.length === 0 ? (
+                      "—"
+                    ) : (
+                      <span className="flex flex-wrap gap-1">
+                        {detail.refs.map((ref) => (
+                          <Badge key={ref.name} variant="outline" title={ref.snapshot_id}>
+                            {ref.kind === "tag" ? <Tag /> : <GitBranch />}
+                            {ref.name}
+                          </Badge>
+                        ))}
+                      </span>
+                    ),
+                },
+              ]}
+            />
+          </Panel>
+        </Section>
+        <PropertiesEditor
+          detail={detail}
+          target={{ catalog_id: catalogId, namespace: detail.namespace, table: detail.name }}
+        />
+      </div>
     </div>
   );
 }
 
 function DataTab({ sql }: { sql: string }) {
   const rows = useQuery({ queryKey: ["preview-rows", sql], queryFn: () => api.query(sql, 50) });
-  if (rows.isPending) return <p className="muted">Reading rows…</p>;
-  if (rows.isError) return <p className="error">{errorMessage(rows.error)}</p>;
   return (
-    <div>
-      <p className="muted small">
-        The first 50 rows of the current snapshot. <Link to={`/sql?q=${encodeURIComponent(sql)}`}>Open in SQL</Link>
-      </p>
-      <Results result={rows.data} />
-    </div>
+    <Section
+      title="First rows"
+      description="The first 50 rows of the current snapshot."
+      actions={
+        <Button variant="outline" size="sm" asChild>
+          <Link to={`/sql?q=${encodeURIComponent(sql)}`}>
+            <SquareTerminal />
+            Open in SQL
+          </Link>
+        </Button>
+      }
+    >
+      {rows.isPending && <Loading label="Reading rows…" />}
+      {rows.isError && <ErrorNotice error={rows.error} />}
+      {rows.data && <Results result={rows.data} />}
+    </Section>
   );
 }
 
 function SchemaTab({ detail }: { detail: TableDetail }) {
+  const top = detail.schema.filter((field) => field.depth === 0).length;
   return (
-    <table className="grid">
-      <thead>
-        <tr>
-          <th className="right">ID</th>
-          <th>Column</th>
-          <th>Type</th>
-          <th>Required</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-        {detail.schema.map((field) => (
-          <tr key={field.id}>
-            <td className="right muted">{field.id}</td>
-            <td className="mono" style={{ paddingLeft: `${12 + field.depth * 18}px` }}>
-              {field.name}
-            </td>
-            <td className="mono">{field.type}</td>
-            <td>{field.required ? "Yes" : ""}</td>
-            <td className="muted">{field.doc ?? ""}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <Section title={`Schema ${detail.schema_id}`} description={`${top} column${top === 1 ? "" : "s"}${detail.schema.length > top ? `, ${detail.schema.length - top} nested fields` : ""}.`}>
+      <Panel>
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-muted/50 hover:bg-muted/50">
+              <TableHead className="w-14 text-right">ID</TableHead>
+              <TableHead>Column</TableHead>
+              <TableHead>Type</TableHead>
+              <TableHead>Nullable</TableHead>
+              <TableHead>Description</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {detail.schema.map((field) => (
+              <TableRow key={field.id}>
+                <TableCell className="text-right text-muted-foreground tabular-nums">{field.id}</TableCell>
+                <TableCell className="font-mono text-[13px]" style={{ paddingLeft: `${8 + field.depth * 20}px` }}>
+                  {field.depth > 0 && <span className="mr-1 text-muted-foreground">└</span>}
+                  {field.name}
+                </TableCell>
+                <TableCell>
+                  <span className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs text-primary">{field.type}</span>
+                </TableCell>
+                <TableCell className="text-muted-foreground">{field.required ? "required" : "nullable"}</TableCell>
+                <TableCell className="whitespace-normal text-muted-foreground">{field.doc ?? ""}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Panel>
+    </Section>
   );
 }
 
@@ -219,91 +364,112 @@ function SnapshotsTab({ detail }: { detail: TableDetail }) {
     refsBySnapshot.set(ref.snapshot_id, [...(refsBySnapshot.get(ref.snapshot_id) ?? []), ref.name]);
   }
   const newestFirst = [...detail.snapshots].reverse();
-  if (newestFirst.length === 0) return <p className="muted">This table has no snapshots yet.</p>;
+  if (newestFirst.length === 0) return <p className="text-sm text-muted-foreground">This table has no snapshots yet.</p>;
   return (
-    <>
-    <TrendChart snapshots={detail.snapshots} />
-    <table className="grid">
-      <thead>
-        <tr>
-          <th>Committed</th>
-          <th>Snapshot</th>
-          <th>Operation</th>
-          <th className="right">Files added</th>
-          <th className="right">Files removed</th>
-          <th className="right">Records added</th>
-          <th className="right">Records removed</th>
-          <th className="right">Total records</th>
-        </tr>
-      </thead>
-      <tbody>
-        {newestFirst.map((snapshot) => {
-          const s = snapshot.summary;
-          const added = Number(s["added-data-files"] ?? 0) + Number(s["added-delete-files"] ?? 0);
-          const removed = Number(s["deleted-data-files"] ?? 0) + Number(s["removed-delete-files"] ?? 0);
-          const open = expanded === snapshot.snapshot_id;
-          return (
-            <Fragment key={snapshot.snapshot_id}>
-            <tr
-              className="clickable"
-              onClick={() => setExpanded(open ? null : snapshot.snapshot_id)}
-              title="Show the full summary"
-            >
-              <td className="nowrap">{formatTime(snapshot.timestamp_ms)}</td>
-              <td className="mono">
-                {snapshot.snapshot_id}
-                {snapshot.snapshot_id === detail.current_snapshot_id && <span className="badge current">current</span>}
-                {(refsBySnapshot.get(snapshot.snapshot_id) ?? [])
-                  .filter((name) => name !== "main")
-                  .map((name) => (
-                    <span key={name} className="badge branch">
-                      {name}
-                    </span>
-                  ))}
-              </td>
-              <td>
-                <span className={`op op-${snapshot.operation}`}>{snapshot.operation}</span>
-              </td>
-              <td className="right">{added ? formatNumber(added) : ""}</td>
-              <td className="right">{removed ? formatNumber(removed) : ""}</td>
-              <td className="right">{s["added-records"] ? formatNumber(s["added-records"]) : ""}</td>
-              <td className="right">{s["deleted-records"] ? formatNumber(s["deleted-records"]) : ""}</td>
-              <td className="right">{formatNumber(s["total-records"])}</td>
-            </tr>
-            {open && (
-              <tr className="detail-row">
-                <td colSpan={8}>
-                  <Link
-                    className="small"
-                    to={`/sql?q=${encodeURIComponent(
-                      `SELECT * FROM ${sqlTableName(detail.catalog, detail.namespace, `${detail.name}@${snapshot.snapshot_id}`)} LIMIT 100`,
-                    )}`}
-                  >
-                    Query the table as of this snapshot
-                  </Link>
-                  <dl className="summary-grid">
-                    <dt>Snapshot</dt>
-                    <dd className="mono">{snapshot.snapshot_id}</dd>
-                    <dt>Parent</dt>
-                    <dd className="mono">{snapshot.parent_id ?? "—"}</dd>
-                    <dt>Sequence number</dt>
-                    <dd>{snapshot.sequence_number}</dd>
-                    {Object.entries(s).map(([key, value]) => (
-                      <Fragment key={key}>
-                        <dt>{key}</dt>
-                        <dd className="mono">{value}</dd>
-                      </Fragment>
-                    ))}
-                  </dl>
-                </td>
-              </tr>
-            )}
-            </Fragment>
-          );
-        })}
-      </tbody>
-    </table>
-    </>
+    <div className="flex flex-col gap-6">
+      <TrendChart snapshots={detail.snapshots} />
+      <Section title="History" description="Newest first. Click a snapshot for its full summary.">
+        <Panel>
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/50 hover:bg-muted/50">
+                <TableHead className="w-8" />
+                <TableHead>Committed</TableHead>
+                <TableHead>Snapshot</TableHead>
+                <TableHead>Operation</TableHead>
+                <TableHead className="text-right">Files added</TableHead>
+                <TableHead className="text-right">Files removed</TableHead>
+                <TableHead className="text-right">Records added</TableHead>
+                <TableHead className="text-right">Records removed</TableHead>
+                <TableHead className="text-right">Total records</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {newestFirst.map((snapshot) => {
+                const s = snapshot.summary;
+                const added = Number(s["added-data-files"] ?? 0) + Number(s["added-delete-files"] ?? 0);
+                const removed = Number(s["deleted-data-files"] ?? 0) + Number(s["removed-delete-files"] ?? 0);
+                const open = expanded === snapshot.snapshot_id;
+                const asOf = `SELECT * FROM ${sqlTableName(detail.catalog, detail.namespace, `${detail.name}@${snapshot.snapshot_id}`)} LIMIT 100`;
+                return (
+                  <Fragment key={snapshot.snapshot_id}>
+                    <TableRow
+                      className="cursor-pointer"
+                      data-state={open ? "selected" : undefined}
+                      onClick={() => setExpanded(open ? null : snapshot.snapshot_id)}
+                    >
+                      <TableCell className="pr-0 text-muted-foreground">
+                        <ChevronRight className={cn("size-4 transition-transform", open && "rotate-90")} />
+                      </TableCell>
+                      <TableCell title={formatTime(snapshot.timestamp_ms)}>{formatTime(snapshot.timestamp_ms)}</TableCell>
+                      <TableCell>
+                        <span className="flex items-center gap-1.5 font-mono text-[13px]">
+                          {snapshot.snapshot_id}
+                          {snapshot.snapshot_id === detail.current_snapshot_id && (
+                            <Badge className="h-4.5 px-1.5 text-[10px]">current</Badge>
+                          )}
+                          {(refsBySnapshot.get(snapshot.snapshot_id) ?? [])
+                            .filter((ref) => ref !== "main")
+                            .map((ref) => (
+                              <Badge key={ref} variant="outline" className="h-4.5 px-1.5 text-[10px]">
+                                <GitBranch />
+                                {ref}
+                              </Badge>
+                            ))}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <OperationBadge operation={snapshot.operation} />
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{added ? formatNumber(added) : ""}</TableCell>
+                      <TableCell className="text-right tabular-nums">{removed ? formatNumber(removed) : ""}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {s["added-records"] ? formatNumber(s["added-records"]) : ""}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {s["deleted-records"] ? formatNumber(s["deleted-records"]) : ""}
+                      </TableCell>
+                      <TableCell className="text-right font-medium tabular-nums">{formatNumber(s["total-records"])}</TableCell>
+                    </TableRow>
+                    {open && (
+                      <TableRow className="bg-muted/30 hover:bg-muted/30">
+                        <TableCell />
+                        <TableCell colSpan={8} className="py-4 whitespace-normal">
+                          <div className="flex flex-col gap-3">
+                            <div>
+                              <Button size="sm" variant="outline" asChild>
+                                <Link to={`/sql?q=${encodeURIComponent(asOf)}`}>
+                                  <SquareTerminal />
+                                  Query the table as of this snapshot
+                                </Link>
+                              </Button>
+                            </div>
+                            <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1 text-xs sm:grid-cols-[max-content_1fr_max-content_1fr]">
+                              <dt className="text-muted-foreground">snapshot</dt>
+                              <dd className="font-mono">{snapshot.snapshot_id}</dd>
+                              <dt className="text-muted-foreground">parent</dt>
+                              <dd className="font-mono">{snapshot.parent_id ?? "—"}</dd>
+                              <dt className="text-muted-foreground">sequence-number</dt>
+                              <dd className="font-mono">{snapshot.sequence_number}</dd>
+                              {Object.entries(s).map(([key, value]) => (
+                                <Fragment key={key}>
+                                  <dt className="text-muted-foreground">{key}</dt>
+                                  <dd className="font-mono break-all">{value}</dd>
+                                </Fragment>
+                              ))}
+                            </dl>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </Panel>
+      </Section>
+    </div>
   );
 }
 
@@ -317,22 +483,28 @@ function FilesTab(props: { detail: TableDetail; catalogId: number; namespace: st
   const newestFirst = [...detail.snapshots].reverse();
 
   return (
-    <div>
+    <div className="flex flex-col gap-6">
       {newestFirst.length > 1 && (
-        <label className="inline">
-          <span>Snapshot</span>
-          <select value={snapshotId ?? ""} onChange={(event) => setSnapshotId(event.target.value || undefined)}>
-            <option value="">Current</option>
-            {newestFirst.map((snapshot) => (
-              <option key={snapshot.snapshot_id} value={snapshot.snapshot_id}>
-                {formatTime(snapshot.timestamp_ms)} · {snapshot.operation} · {snapshot.snapshot_id}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Snapshot</span>
+          <Select value={snapshotId ?? "current"} onValueChange={(value) => setSnapshotId(value === "current" ? undefined : value)}>
+            <SelectTrigger className="w-[min(100%,440px)]" aria-label="Snapshot">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="current">Current</SelectItem>
+              {newestFirst.map((snapshot) => (
+                <SelectItem key={snapshot.snapshot_id} value={snapshot.snapshot_id}>
+                  {formatTime(snapshot.timestamp_ms)} · {snapshot.operation} ·{" "}
+                  <span className="font-mono text-xs">{snapshot.snapshot_id}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       )}
-      {files.isPending && <p className="muted">Reading manifests…</p>}
-      {files.isError && <p className="error">{errorMessage(files.error)}</p>}
+      {files.isPending && <Loading label="Reading manifests…" />}
+      {files.isError && <ErrorNotice error={files.error} />}
       {files.data && <FileStatsView stats={files.data} />}
       {detail.partition_fields.length > 0 && snapshotId === undefined && (
         <Partitions catalogId={catalogId} namespace={namespace} name={detail.name} />
@@ -349,136 +521,170 @@ function Partitions(props: { catalogId: number; namespace: string[]; name: strin
     queryFn: () => api.partitions(props.catalogId, props.namespace, props.name),
   });
   const [sort, setSort] = useState<"size" | "name">("size");
-  if (partitions.isPending) return <p className="muted">Reading partitions…</p>;
-  if (partitions.isError) return <p className="error">{errorMessage(partitions.error)}</p>;
+  if (partitions.isPending) return <Loading label="Reading partitions…" />;
+  if (partitions.isError) return <ErrorNotice error={partitions.error} />;
   const rows = [...partitions.data].sort((a, b) =>
     sort === "size" ? b.data_bytes - a.data_bytes : a.partition.localeCompare(b.partition),
   );
   const largest = Math.max(1, ...rows.map((row) => row.data_bytes));
   const total = rows.reduce((sum, row) => sum + row.data_bytes, 0);
   return (
-    <div>
-      <div className="section-header">
-        <h2>Partitions ({formatNumber(rows.length)})</h2>
-        <div className="segmented small-segmented">
-          <button className={sort === "size" ? "active" : ""} onClick={() => setSort("size")}>
-            Largest first
-          </button>
-          <button className={sort === "name" ? "active" : ""} onClick={() => setSort("name")}>
-            By name
-          </button>
-        </div>
-      </div>
-      <table className="grid compact">
-        <thead>
-          <tr>
-            <th>Partition</th>
-            <th className="right">Records</th>
-            <th className="right">Data files</th>
-            <th className="right">Data size</th>
-            <th>Share of data</th>
-            <th className="right">Avg file</th>
-            <th className="right">Delete files</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.slice(0, PARTITION_ROWS).map((row) => (
-            <tr key={row.partition}>
-              <td className="mono">{row.partition || "(unpartitioned)"}</td>
-              <td className="right">{formatNumber(row.record_count)}</td>
-              <td className="right">{formatNumber(row.data_files)}</td>
-              <td className="right">{formatBytes(row.data_bytes)}</td>
-              <td className="share-cell">
-                <div className="share-bar" style={{ width: `${Math.max(1, (row.data_bytes / largest) * 110)}px` }} />
-                <span className="muted small">{total ? `${((row.data_bytes / total) * 100).toFixed(1)}%` : ""}</span>
-              </td>
-              <td className="right">{row.data_files ? formatBytes(row.data_bytes / row.data_files) : "—"}</td>
-              <td className="right">{row.delete_files ? formatNumber(row.delete_files) : ""}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <Section
+      title={`Partitions (${formatNumber(rows.length)})`}
+      actions={
+        <ToggleGroup
+          type="single"
+          variant="outline"
+          size="sm"
+          value={sort}
+          onValueChange={(value) => value && setSort(value as "size" | "name")}
+        >
+          <ToggleGroupItem value="size">Largest first</ToggleGroupItem>
+          <ToggleGroupItem value="name">By name</ToggleGroupItem>
+        </ToggleGroup>
+      }
+    >
+      <Panel>
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-muted/50 hover:bg-muted/50">
+              <TableHead>Partition</TableHead>
+              <TableHead className="text-right">Records</TableHead>
+              <TableHead className="text-right">Data files</TableHead>
+              <TableHead className="text-right">Data size</TableHead>
+              <TableHead className="w-48">Share of data</TableHead>
+              <TableHead className="text-right">Avg file</TableHead>
+              <TableHead className="text-right">Delete files</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.slice(0, PARTITION_ROWS).map((row) => (
+              <TableRow key={row.partition}>
+                <TableCell className="font-mono text-[13px]">{row.partition || "(unpartitioned)"}</TableCell>
+                <TableCell className="text-right tabular-nums">{formatNumber(row.record_count)}</TableCell>
+                <TableCell className="text-right tabular-nums">{formatNumber(row.data_files)}</TableCell>
+                <TableCell className="text-right tabular-nums">{formatBytes(row.data_bytes)}</TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-2">
+                    <div className="h-1.5 w-28 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-chart-1"
+                        style={{ width: `${Math.max(2, (row.data_bytes / largest) * 100)}%` }}
+                      />
+                    </div>
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {total ? `${((row.data_bytes / total) * 100).toFixed(1)}%` : ""}
+                    </span>
+                  </div>
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {row.data_files ? formatBytes(row.data_bytes / row.data_files) : "—"}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">{row.delete_files ? formatNumber(row.delete_files) : ""}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Panel>
       {rows.length > PARTITION_ROWS && (
-        <p className="muted small">
-          Showing {PARTITION_ROWS} of {formatNumber(rows.length)}. Query{" "}
-          <code>"{props.name}$partitions"</code> in SQL for all of them.
+        <p className="text-xs text-muted-foreground">
+          Showing {PARTITION_ROWS} of {formatNumber(rows.length)}. Query <code>"{props.name}$partitions"</code> in SQL
+          for all of them.
         </p>
       )}
-    </div>
+    </Section>
   );
 }
 
 function FileStatsView({ stats }: { stats: FileStats }) {
-  if (!stats.snapshot_id) return <p className="muted">This table has no snapshots yet.</p>;
+  if (!stats.snapshot_id) return <p className="text-sm text-muted-foreground">This table has no snapshots yet.</p>;
   const deletes = stats.position_deletes.files + stats.equality_deletes.files;
   const max = Math.max(1, ...stats.buckets.map((b) => b.data_files + b.delete_files));
   const small = stats.buckets[0]?.data_files ?? 0;
   const average = stats.data.files ? stats.data.bytes / stats.data.files : 0;
   return (
-    <div className="files">
-      <div className="stats">
-        <Stat label="Data files" value={formatNumber(stats.data.files)} />
-        <Stat label="Data size" value={formatBytes(stats.data.bytes)} />
-        <Stat label="Average data file" value={stats.data.files ? formatBytes(average) : "—"} />
-        <Stat label="Records" value={formatNumber(stats.data.records)} />
-        <Stat label="Delete files" value={formatNumber(deletes)} />
-        <Stat label="Manifests" value={formatNumber(stats.manifests)} />
-      </div>
-      {stats.data.files > 0 && (
-        <p className="muted">
-          {formatNumber(small)} of {formatNumber(stats.data.files)} data files are smaller than 8 MiB.
-        </p>
-      )}
-      <h2>Files by size</h2>
-      <div className="histogram">
-        {stats.buckets.map((bucket) => (
-          <div className="histogram-row" key={bucket.label}>
-            <span className="histogram-label">{bucket.label}</span>
-            <div className="histogram-bar">
-              <div className="bar data" style={{ width: `${(bucket.data_files / max) * 100}%` }} />
-              <div className="bar deletes" style={{ width: `${(bucket.delete_files / max) * 100}%` }} />
-            </div>
-            <span className="histogram-count">
-              {formatNumber(bucket.data_files)}
-              {bucket.delete_files > 0 && <span className="muted"> + {formatNumber(bucket.delete_files)} deletes</span>}
+    <>
+      <StatGrid>
+        <Stat icon={Files} label="Data files" value={formatNumber(stats.data.files)} />
+        <Stat icon={Database} label="Data size" value={formatBytes(stats.data.bytes)} />
+        <Stat icon={Files} label="Average data file" value={stats.data.files ? formatBytes(average) : "—"} />
+        <Stat icon={Rows3} label="Records" value={formatNumber(stats.data.records)} />
+        <Stat icon={FileX} label="Delete files" value={formatNumber(deletes)} tone={deletes > 0 ? "warning" : undefined} />
+        <Stat icon={FileStack} label="Manifests" value={formatNumber(stats.manifests)} />
+      </StatGrid>
+      <Section
+        title="Files by size"
+        description={
+          stats.data.files > 0
+            ? `${formatNumber(small)} of ${formatNumber(stats.data.files)} data files are smaller than 8 MiB.`
+            : undefined
+        }
+        actions={
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1.5">
+              <Dot className="rounded-sm bg-chart-1" /> Data files
+            </span>
+            <span className="flex items-center gap-1.5">
+              <Dot className="rounded-sm bg-chart-3" /> Delete files
             </span>
           </div>
-        ))}
-      </div>
-      <div className="legend">
-        <span>
-          <i className="swatch data" /> Data files
-        </span>
-        <span>
-          <i className="swatch deletes" /> Delete files
-        </span>
-      </div>
+        }
+      >
+        <Panel className="p-4">
+          <div className="flex flex-col gap-2">
+            {stats.buckets.map((bucket) => (
+              <div key={bucket.label} className="grid grid-cols-[88px_1fr_auto] items-center gap-3 text-sm">
+                <span className="text-right text-xs text-muted-foreground tabular-nums">{bucket.label}</span>
+                <div className="flex h-5 items-center gap-0.5">
+                  <div
+                    className="h-full rounded-sm bg-chart-1 transition-[width]"
+                    style={{ width: `${(bucket.data_files / max) * 100}%` }}
+                  />
+                  <div
+                    className="h-full rounded-sm bg-chart-3 transition-[width]"
+                    style={{ width: `${(bucket.delete_files / max) * 100}%` }}
+                  />
+                </div>
+                <span className="min-w-24 text-right text-xs tabular-nums">
+                  {formatNumber(bucket.data_files)}
+                  {bucket.delete_files > 0 && (
+                    <span className="text-muted-foreground"> + {formatNumber(bucket.delete_files)} deletes</span>
+                  )}
+                </span>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      </Section>
       {deletes > 0 && (
-        <table className="grid compact">
-          <thead>
-            <tr>
-              <th>Delete files</th>
-              <th className="right">Files</th>
-              <th className="right">Size</th>
-              <th className="right">Records</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Position deletes</td>
-              <td className="right">{formatNumber(stats.position_deletes.files)}</td>
-              <td className="right">{formatBytes(stats.position_deletes.bytes)}</td>
-              <td className="right">{formatNumber(stats.position_deletes.records)}</td>
-            </tr>
-            <tr>
-              <td>Equality deletes</td>
-              <td className="right">{formatNumber(stats.equality_deletes.files)}</td>
-              <td className="right">{formatBytes(stats.equality_deletes.bytes)}</td>
-              <td className="right">{formatNumber(stats.equality_deletes.records)}</td>
-            </tr>
-          </tbody>
-        </table>
+        <Section title="Delete files">
+          <Panel>
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50 hover:bg-muted/50">
+                  <TableHead>Kind</TableHead>
+                  <TableHead className="text-right">Files</TableHead>
+                  <TableHead className="text-right">Size</TableHead>
+                  <TableHead className="text-right">Records</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {[
+                  { label: "Position deletes", stats: stats.position_deletes },
+                  { label: "Equality deletes", stats: stats.equality_deletes },
+                ].map((row) => (
+                  <TableRow key={row.label}>
+                    <TableCell>{row.label}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatNumber(row.stats.files)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatBytes(row.stats.bytes)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatNumber(row.stats.records)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Panel>
+        </Section>
       )}
-    </div>
+    </>
   );
 }

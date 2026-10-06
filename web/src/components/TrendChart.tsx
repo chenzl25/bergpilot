@@ -1,7 +1,11 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import type { SnapshotInfo } from "../api/generated/SnapshotInfo";
-import { formatBytes, formatNumber, formatTime } from "../format";
+import type { SnapshotInfo } from "@/api/generated/SnapshotInfo";
+import { Panel } from "@/components/page";
+import { Badge } from "@/components/ui/badge";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { formatBytes, formatNumber, formatTime } from "@/format";
+import { cn } from "@/lib/utils";
 
 type Metric = "records" | "files" | "size" | "deletes";
 
@@ -12,9 +16,36 @@ const METRICS: { id: Metric; label: string; key: string; format: (value: number)
   { id: "deletes", label: "Delete files", key: "total-delete-files", format: formatNumber },
 ];
 
-const WIDTH = 860;
-const HEIGHT = 200;
-const PAD = { left: 64, right: 16, top: 12, bottom: 28 };
+const OPERATIONS: Record<string, { className: string; color: string }> = {
+  append: { className: "border-success/30 bg-success/10 text-success", color: "var(--chart-1)" },
+  overwrite: { className: "border-warning/40 bg-warning/10 text-warning", color: "var(--chart-3)" },
+  replace: { className: "border-chart-4/30 bg-chart-4/10 text-chart-4", color: "var(--chart-4)" },
+  delete: { className: "border-destructive/30 bg-destructive/10 text-destructive", color: "var(--chart-5)" },
+};
+
+/** Snapshot operation: append, overwrite, replace (compaction) or delete. */
+export function OperationBadge({ operation }: { operation: string }) {
+  return (
+    <Badge variant="outline" className={cn("font-medium", OPERATIONS[operation]?.className)}>
+      {operation}
+    </Badge>
+  );
+}
+
+const HEIGHT = 220;
+const PAD = { left: 64, right: 16, top: 16, bottom: 28 };
+
+function useWidth<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    if (!ref.current) return;
+    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
+    observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, width] as const;
+}
 
 /**
  * A step chart of a table total across snapshots, read from snapshot
@@ -24,75 +55,121 @@ const PAD = { left: 64, right: 16, top: 12, bottom: 28 };
  */
 export function TrendChart({ snapshots }: { snapshots: SnapshotInfo[] }) {
   const [metric, setMetric] = useState<Metric>("records");
+  const [hover, setHover] = useState<number | null>(null);
+  const [ref, width] = useWidth<HTMLDivElement>();
   const config = METRICS.find((m) => m.id === metric)!;
   const points = snapshots
-    .map((snapshot) => ({
-      t: snapshot.timestamp_ms,
-      v: Number(snapshot.summary[config.key]),
-      op: snapshot.operation,
-    }))
+    .map((snapshot) => ({ t: snapshot.timestamp_ms, v: Number(snapshot.summary[config.key]), op: snapshot.operation }))
     .filter((point) => Number.isFinite(point.v));
-  const [hover, setHover] = useState<number | null>(null);
 
   if (points.length < 2) return null;
-  const tMin = points[0].t;
-  const tMax = points[points.length - 1].t;
   const vMax = Math.max(...points.map((p) => p.v), 1);
-  const x = (index: number) => PAD.left + (index / (points.length - 1)) * (WIDTH - PAD.left - PAD.right);
+  const plotWidth = Math.max(width - PAD.left - PAD.right, 10);
+  const x = (index: number) => PAD.left + (index / (points.length - 1)) * plotWidth;
   const y = (v: number) => PAD.top + (1 - v / vMax) * (HEIGHT - PAD.top - PAD.bottom);
-  let path = `M ${x(0)} ${y(points[0].v)}`;
-  for (let i = 1; i < points.length; i++) {
-    path += ` H ${x(i)} V ${y(points[i].v)}`;
-  }
-  const active = hover !== null ? points[hover] : points[points.length - 1];
+  let line = `M ${x(0)} ${y(points[0].v)}`;
+  for (let i = 1; i < points.length; i++) line += ` H ${x(i)} V ${y(points[i].v)}`;
+  const area = `${line} V ${y(0)} H ${x(0)} Z`;
+  const active = hover ?? points.length - 1;
+  const point = points[active];
 
   return (
-    <div className="trend">
-      <div className="trend-header">
-        <div className="segmented">
+    <Panel>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+        <ToggleGroup
+          type="single"
+          variant="outline"
+          size="sm"
+          value={metric}
+          onValueChange={(value) => value && setMetric(value as Metric)}
+        >
           {METRICS.map((m) => (
-            <button key={m.id} className={metric === m.id ? "active" : ""} onClick={() => setMetric(m.id)}>
+            <ToggleGroupItem key={m.id} value={m.id}>
               {m.label}
-            </button>
+            </ToggleGroupItem>
           ))}
+        </ToggleGroup>
+        <div className="flex items-center gap-2 text-sm">
+          <span className="font-semibold tabular-nums">{config.format(point.v)}</span>
+          <span className="text-muted-foreground">{formatTime(point.t)}</span>
+          <OperationBadge operation={point.op} />
         </div>
-        <span className="muted small">
-          {config.format(active.v)} at {formatTime(active.t)} ({active.op})
-        </span>
       </div>
-      <svg
-        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        className="trend-svg"
-        role="img"
-        aria-label={`${config.label} over time`}
-        onMouseLeave={() => setHover(null)}
-      >
-        {[0, 0.5, 1].map((f) => (
-          <g key={f}>
-            <line x1={PAD.left} x2={WIDTH - PAD.right} y1={y(vMax * f)} y2={y(vMax * f)} className="trend-grid" />
-            <text x={PAD.left - 8} y={y(vMax * f) + 4} className="trend-axis" textAnchor="end">
-              {config.format(vMax * f)}
+      <div ref={ref} className="px-2 py-2">
+        {width > 0 && (
+          <svg
+            width={width}
+            height={HEIGHT}
+            role="img"
+            aria-label={`${config.label} over time`}
+            className="block"
+            onMouseLeave={() => setHover(null)}
+            onMouseMove={(event) => {
+              const box = event.currentTarget.getBoundingClientRect();
+              const fraction = (event.clientX - box.left - PAD.left) / plotWidth;
+              setHover(Math.min(points.length - 1, Math.max(0, Math.round(fraction * (points.length - 1)))));
+            }}
+          >
+            <defs>
+              <linearGradient id="trend-fill" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.28} />
+                <stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            {[0, 0.5, 1].map((f) => (
+              <g key={f}>
+                <line
+                  x1={PAD.left}
+                  x2={width - PAD.right}
+                  y1={y(vMax * f)}
+                  y2={y(vMax * f)}
+                  stroke="var(--border)"
+                  strokeDasharray={f === 0 ? undefined : "3 4"}
+                />
+                <text
+                  x={PAD.left - 10}
+                  y={y(vMax * f) + 4}
+                  textAnchor="end"
+                  className="fill-muted-foreground text-[11px] tabular-nums"
+                >
+                  {config.format(vMax * f)}
+                </text>
+              </g>
+            ))}
+            <text x={PAD.left} y={HEIGHT - 8} className="fill-muted-foreground text-[11px]">
+              {formatTime(points[0].t)}
             </text>
-          </g>
-        ))}
-        <text x={PAD.left} y={HEIGHT - 8} className="trend-axis">
-          {formatTime(tMin)}
-        </text>
-        <text x={WIDTH - PAD.right} y={HEIGHT - 8} className="trend-axis" textAnchor="end">
-          {formatTime(tMax)}
-        </text>
-        <path d={path} className="trend-line" />
-        {points.map((point, index) => (
-          <circle
-            key={index}
-            cx={x(index)}
-            cy={y(point.v)}
-            r={hover === index ? 5 : 3}
-            className={`trend-dot op-dot-${point.op}`}
-            onMouseEnter={() => setHover(index)}
-          />
-        ))}
-      </svg>
-    </div>
+            <text x={width - PAD.right} y={HEIGHT - 8} textAnchor="end" className="fill-muted-foreground text-[11px]">
+              {formatTime(points[points.length - 1].t)}
+            </text>
+            <path d={area} fill="url(#trend-fill)" />
+            <path d={line} fill="none" stroke="var(--chart-1)" strokeWidth={2} strokeLinejoin="round" />
+            {hover !== null && (
+              <line
+                x1={x(hover)}
+                x2={x(hover)}
+                y1={PAD.top}
+                y2={HEIGHT - PAD.bottom}
+                stroke="var(--muted-foreground)"
+                strokeOpacity={0.4}
+              />
+            )}
+            {points.map((p, index) =>
+              p.op !== "append" || index === active ? (
+                <circle
+                  key={index}
+                  cx={x(index)}
+                  cy={y(p.v)}
+                  r={index === active ? 4.5 : 3.5}
+                  fill={OPERATIONS[p.op]?.color ?? "var(--muted-foreground)"}
+                  stroke="var(--card)"
+                  strokeWidth={2}
+                />
+              ) : null,
+            )}
+          </svg>
+        )}
+      </div>
+    </Panel>
   );
 }
