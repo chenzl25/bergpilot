@@ -19,7 +19,7 @@ use common::racing::RacingCatalog;
 use common::upsert::{COMMIT_EPOCH, Change, UpsertTable, commit_files, position_delete_file};
 use common::{LocalCatalog, call, run_job};
 use futures::FutureExt;
-use iceberg::spec::DataContentType;
+use iceberg::spec::{DataContentType, Operation};
 use serde_json::{Value, json};
 
 use Change::{Delete, Upsert};
@@ -134,21 +134,28 @@ impl Fixture {
         })
     }
 
-    async fn current_epoch(&self) -> Option<String> {
+    /// The RisingWave epoch of the current snapshot, found the way
+    /// RisingWave finds it: from the newest snapshot that has one, looking
+    /// past `replace` snapshots (compactions) only.
+    async fn latest_epoch(&self) -> Option<String> {
         let table = self
             .local
             .catalog
             .load_table(&self.table.ident)
             .await
             .unwrap();
-        table
-            .metadata()
-            .current_snapshot()
-            .unwrap()
-            .summary()
-            .additional_properties
-            .get(COMMIT_EPOCH)
-            .cloned()
+        let metadata = table.metadata();
+        let mut snapshot = metadata.current_snapshot()?;
+        loop {
+            let summary = snapshot.summary();
+            if let Some(epoch) = summary.additional_properties.get(COMMIT_EPOCH) {
+                return Some(epoch.clone());
+            }
+            if summary.operation != Operation::Replace {
+                return None;
+            }
+            snapshot = metadata.snapshot_by_id(snapshot.parent_snapshot_id()?)?;
+        }
     }
 }
 
@@ -215,8 +222,8 @@ async fn reads_and_compacts_equality_deletes() {
 
 /// The writer commits updates and deletes of rows the compaction is
 /// rewriting, after the compaction read them. The compaction's output must
-/// not bring those rows back, and the snapshot it adds must not claim an
-/// older RisingWave epoch than the writer's latest commit.
+/// not bring those rows back, and the snapshot it adds must not hide the
+/// writer's latest RisingWave epoch behind an older one.
 #[tokio::test(flavor = "multi_thread")]
 async fn compaction_keeps_equality_deletes_committed_while_it_runs() {
     let mut fixture = fixture().await;
@@ -244,10 +251,10 @@ async fn compaction_keeps_equality_deletes_committed_while_it_runs() {
     assert!(racing.raced().await);
 
     assert_eq!(fixture.rows().await, fixture.table.expected_rows());
-    let current = fixture.current_epoch().await;
-    assert!(
-        current.is_none() || current.as_deref() == Some("4"),
-        "the compaction snapshot claims epoch {current:?} after epoch 4 was committed"
+    assert_eq!(
+        fixture.latest_epoch().await.as_deref(),
+        Some("4"),
+        "RisingWave must find the epoch of its latest commit"
     );
 }
 
@@ -338,4 +345,46 @@ async fn compaction_reports_progress() {
     assert_eq!(last.bytes_done, last.bytes_total);
     assert!(last.bytes_written > 0, "{last:?}");
     assert!(io.bytes_read(&fixture.first_data_file) > 0);
+}
+
+/// Each equality delete file adds a level to the predicate iceberg-rust walks
+/// recursively when reading. Hundreds of files overflow a default 2 MiB
+/// thread stack in a debug build; BergPilot's runtime has room for them.
+#[test]
+fn reads_a_table_with_hundreds_of_equality_delete_files() {
+    const FILES: i64 = 400;
+    bergpilot::server::runtime().unwrap().block_on(async {
+        let dir = tempfile::tempdir().unwrap();
+        let local = LocalCatalog::new(dir.path()).await;
+        let mut table = UpsertTable::create(local.catalog.clone(), "sales").await;
+        let rows: Vec<Change> = (1..=FILES + 100).map(|id| Upsert(id, "x", 1.0)).collect();
+        table.commit(&rows).await;
+        let loaded = local.catalog.load_table(&table.ident).await.unwrap();
+        let deletes = common::upsert::equality_delete_files(&loaded, 1..=FILES).await;
+        assert_eq!(deletes.len(), FILES as usize);
+        commit_files(local.catalog.as_ref(), &table.ident, deletes, 2).await;
+
+        let store = Store::open(&dir.path().join("bergpilot")).await.unwrap();
+        let router = app(AppState::new(store, None));
+        let (_, created) = call(
+            &router,
+            "POST",
+            "/api/catalogs",
+            Some(local.registration("local")),
+        )
+        .await;
+        assert!(created["id"].is_number(), "{created}");
+        let (_, result) = call(
+            &router,
+            "POST",
+            "/api/query",
+            Some(json!({ "sql": "SELECT count(*), min(id) FROM local.sales.accounts" })),
+        )
+        .await;
+        assert_eq!(
+            result["rows"],
+            json!([["100", (FILES + 1).to_string()]]),
+            "{result}"
+        );
+    });
 }

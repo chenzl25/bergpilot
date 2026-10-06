@@ -22,6 +22,22 @@ use crate::store::Store;
 /// Queries run at the same time; more wait for a slot.
 const QUERY_SLOTS: usize = 2;
 
+/// Stack size of every runtime thread. iceberg-rust combines the equality
+/// delete files that apply to a data file into one predicate, one tree level
+/// per file, and walks it recursively. RisingWave's upsert sinks write a few
+/// such files per commit, so an uncompacted table can need deep stacks; 2 MiB
+/// overflows at a few hundred files in a debug build. Stacks are reserved,
+/// not committed, so the size costs nothing until a thread uses it.
+pub const THREAD_STACK_BYTES: usize = 64 * 1024 * 1024;
+
+/// The runtime BergPilot runs on.
+pub fn runtime() -> std::io::Result<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(THREAD_STACK_BYTES)
+        .build()
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub registry: CatalogRegistry,

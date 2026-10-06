@@ -233,6 +233,53 @@ pub async fn position_delete_file(table: &Table, path: &str, positions: &[i64]) 
     writer.close().await.unwrap()
 }
 
+/// One equality delete file per id, each deleting that id, the way many
+/// RisingWave writers produce many small delete files.
+pub async fn equality_delete_files(
+    table: &Table,
+    ids: impl IntoIterator<Item = i64>,
+) -> Vec<DataFile> {
+    let schema = table.metadata().current_schema().clone();
+    let config = EqualityDeleteWriterConfig::new(vec![1], schema.clone()).unwrap();
+    let equality_schema =
+        Arc::new(arrow_schema_to_schema(config.projected_arrow_schema_ref()).unwrap());
+    let arrow_schema = Arc::new(schema_to_arrow_schema(&schema).unwrap());
+    let mut files = Vec::new();
+    for id in ids {
+        let mut writer = EqualityDeleteFileWriterBuilder::new(
+            RollingFileWriterBuilder::new_with_default_file_size(
+                ParquetWriterBuilder::new(
+                    WriterProperties::builder().build(),
+                    equality_schema.clone(),
+                ),
+                table.file_io().clone(),
+                DefaultLocationGenerator::new(table.metadata()).unwrap(),
+                DefaultFileNameGenerator::new(
+                    format!("many{id}"),
+                    Some("eq-del".to_owned()),
+                    DataFileFormat::Parquet,
+                ),
+            ),
+            config.clone(),
+        )
+        .build(None)
+        .await
+        .unwrap();
+        let row = RecordBatch::try_new(
+            arrow_schema.clone(),
+            vec![
+                Arc::new(Int64Array::from(vec![id])) as ArrayRef,
+                Arc::new(StringArray::from(vec![None::<&str>])),
+                Arc::new(Float64Array::from(vec![None])),
+            ],
+        )
+        .unwrap();
+        writer.write(row).await.unwrap();
+        files.extend(writer.close().await.unwrap());
+    }
+    files
+}
+
 fn delta_writer(table: &Table, epoch: u64) -> impl IcebergWriterBuilder<R = impl IcebergWriter> {
     let schema = table.metadata().current_schema().clone();
     let file_io = table.file_io().clone();

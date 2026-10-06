@@ -10,19 +10,22 @@
 //! - It copies the custom summary properties of the snapshot it started
 //!   from, so the new snapshot can claim an older RisingWave epoch or Flink
 //!   checkpoint than its parent.
+//! - It rebuilds the commit from scratch on every retry, so against a table
+//!   that commits every few seconds it may never get through.
 //!
-//! Here each commit attempt is pinned to one base snapshot: the attempt
-//! checks the deletes committed since the compaction started up to that
-//! base, takes the custom properties from that base, and a catalog wrapper
-//! abandons the attempt if the table has moved past the base by the time the
-//! commit is built. As in Java's `RewriteDataFiles`, the new data files get
-//! the starting snapshot's sequence number, so equality deletes committed
-//! meanwhile still apply to them.
+//! Here the commit is one transaction. Its retries rebase onto the latest
+//! snapshot and reuse the manifests already written, and the catalog it
+//! commits through checks every snapshot it hands out: if a position delete
+//! added since the compaction started may hit a rewritten file, the commit
+//! stops and nothing changes. The new snapshot carries no custom properties,
+//! like Java's `RewriteDataFiles`; RisingWave and Flink look past `replace`
+//! snapshots for their own. As in Java, the new data files get the starting
+//! snapshot's sequence number, so equality deletes committed meanwhile still
+//! apply to them.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -54,44 +57,14 @@ use crate::types::{
 };
 
 const MIB: u64 = 1024 * 1024;
-/// Commit attempts before giving up on a table that keeps changing.
-const MAX_COMMIT_ATTEMPTS: u32 = 8;
+/// Transactions tried before giving up on a table that keeps changing. Each
+/// transaction retries several times on its own.
+const MAX_COMMIT_ATTEMPTS: u32 = 5;
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(500);
 /// Position delete files keep the data file path in this reserved field.
 const DELETE_FILE_PATH_FIELD_ID: i32 = 2147483546;
 /// Manifests read concurrently.
 const MANIFEST_CONCURRENCY: usize = 8;
-
-/// Summary keys that iceberg-rust computes for every snapshot. Everything
-/// else, such as `risingwave.commit.epoch` or Flink's checkpoint id, is
-/// custom and carried over from the base snapshot.
-const COMPUTED_SUMMARY_KEYS: &[&str] = &[
-    "added-data-files",
-    "added-delete-files",
-    "added-equality-delete-files",
-    "added-position-delete-files",
-    "added-files-size",
-    "added-records",
-    "added-equality-deletes",
-    "added-position-deletes",
-    "added-dvs",
-    "deleted-data-files",
-    "removed-delete-files",
-    "removed-equality-delete-files",
-    "removed-position-delete-files",
-    "removed-dvs",
-    "removed-files-size",
-    "deleted-records",
-    "removed-equality-deletes",
-    "removed-position-deletes",
-    "total-data-files",
-    "total-delete-files",
-    "total-files-size",
-    "total-records",
-    "total-equality-deletes",
-    "total-position-deletes",
-    "changed-partition-count",
-];
 
 pub async fn preview(
     catalog: Arc<dyn Catalog>,
@@ -430,72 +403,57 @@ async fn commit(
     schema_id: i32,
     rewrite: Rewrite,
 ) -> ApiResult<Table> {
-    let rewritten_paths: BTreeSet<String> = rewrite
-        .rewritten
-        .iter()
-        .map(|file| file.file_path().to_owned())
-        .collect();
+    let guarded = GuardedCatalog {
+        inner: catalog,
+        ident: ident.clone(),
+        schema_id,
+        start_id: start.snapshot_id(),
+        rewritten: rewrite
+            .rewritten
+            .iter()
+            .map(|file| file.file_path().to_owned())
+            .collect(),
+        checked: tokio::sync::Mutex::new(start.snapshot_id()),
+        conflict: std::sync::Mutex::new(None),
+    };
     for attempt in 1..=MAX_COMMIT_ATTEMPTS {
-        let table = catalog.load_table(ident).await?;
-        if table.metadata().current_schema_id() != schema_id {
-            return Err(ApiError::Conflict(
-                "the table's schema changed while compacting; nothing was changed, run the \
-                 compaction again"
-                    .into(),
-            ));
+        let result = async {
+            let table = guarded.load_table(ident).await?;
+            let tx = Transaction::new(&table);
+            let mut action = tx
+                .rewrite_files()
+                .set_enable_delete_filter_manager(true)
+                .add_data_files(rewrite.added.clone())
+                .delete_files(rewrite.rewritten.clone())
+                .set_target_branch(MAIN_BRANCH.to_owned())
+                .set_new_data_file_sequence_number(start.sequence_number())
+                .set_check_file_existence(true);
+            if let Some(sequence) = rewrite.cleanup_sequence {
+                action = action.set_delete_file_cleanup_min_data_sequence_number(sequence);
+            }
+            action.apply(tx)?.commit(&guarded).await
         }
-        let base = table
-            .metadata()
-            .snapshot_for_ref(MAIN_BRANCH)
-            .cloned()
-            .ok_or_else(|| ApiError::Conflict("the table's main branch is gone".into()))?;
-        if let Some(delete_file) =
-            conflicting_position_delete(&table, start.snapshot_id(), &base, &rewritten_paths)
-                .await?
-        {
-            return Err(ApiError::Conflict(format!(
-                "another writer committed a position delete for a data file this compaction \
-                 rewrote ({delete_file}); committing would bring deleted rows back, so nothing \
-                 was changed. Run the compaction again."
-            )));
-        }
-
-        let tx = Transaction::new(&table);
-        let mut action = tx
-            .rewrite_files()
-            .set_enable_delete_filter_manager(true)
-            .add_data_files(rewrite.added.clone())
-            .delete_files(rewrite.rewritten.clone())
-            .set_target_branch(MAIN_BRANCH.to_owned())
-            .set_new_data_file_sequence_number(start.sequence_number())
-            .set_check_file_existence(true);
-        action.set_snapshot_properties(custom_properties(&base));
-        if let Some(sequence) = rewrite.cleanup_sequence {
-            action = action.set_delete_file_cleanup_min_data_sequence_number(sequence);
-        }
-        let tx = action.apply(tx)?;
-        let pinned = PinnedCatalog {
-            inner: catalog.clone(),
-            ident: ident.clone(),
-            base: base.snapshot_id(),
-            moved: AtomicBool::new(false),
-        };
-        match tx.commit(&pinned).await {
+        .await;
+        match result {
             Ok(table) => return Ok(table),
-            Err(error)
-                if pinned.moved.load(Ordering::Relaxed)
-                    || error.kind() == ErrorKind::CatalogCommitConflicts =>
-            {
-                tracing::info!(table = %ident, attempt, %error, "table changed during commit; retrying");
-                tokio::time::sleep(Duration::from_millis(100 * u64::from(attempt))).await;
+            Err(error) => {
+                if let Some(conflict) = guarded.conflict() {
+                    return Err(ApiError::Conflict(conflict));
+                }
+                match error.kind() {
+                    ErrorKind::CatalogCommitConflicts => {
+                        tracing::info!(table = %ident, attempt, %error, "table kept changing during commit; retrying");
+                        tokio::time::sleep(Duration::from_millis(200 * u64::from(attempt))).await;
+                    }
+                    ErrorKind::DataInvalid => {
+                        return Err(ApiError::Conflict(format!(
+                            "the table changed in a way this compaction cannot commit over \
+                             ({error}); nothing was changed. Run the compaction again."
+                        )));
+                    }
+                    _ => return Err(error.into()),
+                }
             }
-            Err(error) if error.kind() == ErrorKind::DataInvalid => {
-                return Err(ApiError::Conflict(format!(
-                    "the table changed in a way this compaction cannot commit over ({error}); \
-                     nothing was changed. Run the compaction again."
-                )));
-            }
-            Err(error) => return Err(error.into()),
         }
     }
     Err(ApiError::Conflict(format!(
@@ -503,46 +461,101 @@ async fn commit(
     )))
 }
 
-/// The first position delete file, added after `start_id` up to and
-/// including `base`, that may delete rows of a rewritten data file. A file
-/// that names its data file is matched exactly; otherwise the bounds of its
-/// file-path column decide, and a file without bounds is assumed to match.
-async fn conflicting_position_delete(
-    table: &Table,
+/// Forwards to the real catalog and checks every version of the table it
+/// loads before handing it out. A transaction loads the table before each
+/// attempt and builds the commit on what it gets, with the snapshot it got as
+/// a requirement, so the check covers exactly the base each commit lands on.
+struct GuardedCatalog {
+    inner: Arc<dyn Catalog>,
+    ident: TableIdent,
+    schema_id: i32,
     start_id: i64,
-    base: &SnapshotRef,
-    rewritten: &BTreeSet<String>,
-) -> ApiResult<Option<String>> {
-    let metadata = table.metadata();
-    let mut snapshot = base.clone();
-    while snapshot.snapshot_id() != start_id {
-        let list = table.manifest_list_reader(&snapshot).load().await?;
-        let added_delete_manifests = list.entries().iter().filter(|manifest| {
-            manifest.content == ManifestContentType::Deletes
-                && manifest.added_snapshot_id == snapshot.snapshot_id()
-        });
-        for manifest in added_delete_manifests {
-            let manifest = manifest.load_manifest(table.file_io()).await?;
-            for entry in manifest.entries() {
-                if entry.status() == ManifestStatus::Added
-                    && entry.content_type() == DataContentType::PositionDeletes
-                    && may_delete_from(entry.data_file(), rewritten)
-                {
-                    return Ok(Some(entry.data_file().file_path().to_owned()));
-                }
-            }
+    rewritten: BTreeSet<String>,
+    /// The latest snapshot checked; its ancestors back to the start were
+    /// checked too.
+    checked: tokio::sync::Mutex<i64>,
+    conflict: std::sync::Mutex<Option<String>>,
+}
+
+impl GuardedCatalog {
+    fn conflict(&self) -> Option<String> {
+        self.conflict
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clone()
+    }
+
+    /// Why committing on top of `table` would be wrong, if it would.
+    async fn check(&self, table: &Table) -> iceberg::Result<Option<String>> {
+        let metadata = table.metadata();
+        if metadata.current_schema_id() != self.schema_id {
+            return Ok(Some(
+                "the table's schema changed while compacting; nothing was changed. Run the \
+                 compaction again."
+                    .into(),
+            ));
         }
-        snapshot = snapshot
-            .parent_snapshot_id()
-            .and_then(|id| metadata.snapshot_by_id(id))
-            .cloned()
-            .ok_or_else(|| {
-                ApiError::Conflict(
+        let Some(base) = metadata.snapshot_for_ref(MAIN_BRANCH).cloned() else {
+            return Ok(Some("the table's main branch is gone".into()));
+        };
+        let mut checked = self.checked.lock().await;
+        let mut snapshot = base.clone();
+        while snapshot.snapshot_id() != *checked && snapshot.snapshot_id() != self.start_id {
+            if let Some(delete_file) =
+                added_position_delete_for(table, &snapshot, &self.rewritten).await?
+            {
+                return Ok(Some(format!(
+                    "another writer committed a position delete for a data file this \
+                     compaction rewrote ({delete_file}); committing would bring deleted rows \
+                     back, so nothing was changed. Run the compaction again."
+                )));
+            }
+            let Some(parent) = snapshot
+                .parent_snapshot_id()
+                .and_then(|id| metadata.snapshot_by_id(id))
+            else {
+                return Ok(Some(
                     "the snapshot this compaction started from is no longer in the main \
                      branch's history; nothing was changed"
                         .into(),
-                )
-            })?;
+                ));
+            };
+            snapshot = parent.clone();
+        }
+        *checked = base.snapshot_id();
+        Ok(None)
+    }
+}
+
+/// A position delete file added by `snapshot` that may delete rows of a
+/// rewritten data file. A file that names its data file is matched exactly;
+/// otherwise the bounds of its file-path column decide, and a file without
+/// bounds is assumed to match.
+async fn added_position_delete_for(
+    table: &Table,
+    snapshot: &SnapshotRef,
+    rewritten: &BTreeSet<String>,
+) -> iceberg::Result<Option<String>> {
+    let list = table.manifest_list_reader(snapshot).load().await?;
+    let added: Vec<ManifestFile> = list
+        .entries()
+        .iter()
+        .filter(|manifest| {
+            manifest.content == ManifestContentType::Deletes
+                && manifest.added_snapshot_id == snapshot.snapshot_id()
+        })
+        .cloned()
+        .collect();
+    for manifest in added {
+        let manifest = manifest.load_manifest(table.file_io()).await?;
+        for entry in manifest.entries() {
+            if entry.status() == ManifestStatus::Added
+                && entry.content_type() == DataContentType::PositionDeletes
+                && may_delete_from(entry.data_file(), rewritten)
+            {
+                return Ok(Some(entry.data_file().file_path().to_owned()));
+            }
+        }
     }
     Ok(None)
 }
@@ -567,18 +580,6 @@ fn may_delete_from(delete_file: &DataFile, data_paths: &BTreeSet<String>) -> boo
         }
         _ => true,
     }
-}
-
-fn custom_properties(snapshot: &SnapshotRef) -> HashMap<String, String> {
-    snapshot
-        .summary()
-        .additional_properties
-        .iter()
-        .filter(|(key, _)| {
-            !COMPUTED_SUMMARY_KEYS.contains(&key.as_str()) && !key.starts_with("partitions.")
-        })
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect()
 }
 
 /// The live data files of `snapshot` among `paths`.
@@ -648,27 +649,16 @@ async fn delete_cleanup_sequence(table: &Table, snapshot_id: i64) -> ApiResult<O
     Ok(min)
 }
 
-/// Forwards to the real catalog, but fails a load of the table once its main
-/// branch has moved past `base`. A transaction reloads the table before each
-/// commit attempt and rebuilds the commit on whatever it finds; this stops
-/// it from rebuilding on a snapshot the conflict check has not seen.
-struct PinnedCatalog {
-    inner: Arc<dyn Catalog>,
-    ident: TableIdent,
-    base: i64,
-    moved: AtomicBool,
-}
-
-impl fmt::Debug for PinnedCatalog {
+impl fmt::Debug for GuardedCatalog {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PinnedCatalog")
-            .field("base", &self.base)
+        f.debug_struct("GuardedCatalog")
+            .field("ident", &self.ident)
             .finish_non_exhaustive()
     }
 }
 
 #[async_trait]
-impl Catalog for PinnedCatalog {
+impl Catalog for GuardedCatalog {
     async fn list_namespaces(
         &self,
         parent: Option<&NamespaceIdent>,
@@ -718,19 +708,21 @@ impl Catalog for PinnedCatalog {
 
     async fn load_table(&self, ident: &TableIdent) -> iceberg::Result<Table> {
         let table = self.inner.load_table(ident).await?;
-        let current = table
-            .metadata()
-            .snapshot_for_ref(MAIN_BRANCH)
-            .map(|snapshot| snapshot.snapshot_id());
-        if *ident == self.ident && current != Some(self.base) {
-            self.moved.store(true, Ordering::Relaxed);
-            return Err(Error::new(
-                ErrorKind::CatalogCommitConflicts,
-                "the table changed after the compaction checked it",
-            )
-            .with_retryable(false));
+        if *ident != self.ident {
+            return Ok(table);
         }
-        Ok(table)
+        match self.check(&table).await? {
+            None => Ok(table),
+            Some(conflict) => {
+                let error = Error::new(ErrorKind::PreconditionFailed, conflict.clone())
+                    .with_retryable(false);
+                *self
+                    .conflict
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner()) = Some(conflict);
+                Err(error)
+            }
+        }
     }
 
     async fn drop_table(&self, ident: &TableIdent) -> iceberg::Result<()> {
@@ -839,29 +831,6 @@ mod tests {
         assert!(
             matches(position_delete(None, None)),
             "no bounds: assume it matches"
-        );
-    }
-
-    #[test]
-    fn keeps_only_custom_summary_properties() {
-        let summary = iceberg::spec::Summary {
-            operation: iceberg::spec::Operation::Append,
-            additional_properties: HashMap::from([
-                ("risingwave.commit.epoch".to_owned(), "42".to_owned()),
-                ("added-data-files".to_owned(), "3".to_owned()),
-                ("partitions.a=1".to_owned(), "x".to_owned()),
-            ]),
-        };
-        let snapshot = iceberg::spec::Snapshot::builder()
-            .with_snapshot_id(1)
-            .with_sequence_number(1)
-            .with_timestamp_ms(0)
-            .with_manifest_list("m.avro")
-            .with_summary(summary)
-            .build();
-        assert_eq!(
-            custom_properties(&Arc::new(snapshot)),
-            HashMap::from([("risingwave.commit.epoch".to_owned(), "42".to_owned())])
         );
     }
 }
