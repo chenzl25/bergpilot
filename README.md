@@ -10,8 +10,10 @@ Observability and maintenance for Apache Iceberg™ tables, in a single Rust ser
 
 - **Browse** catalogs, nested namespaces and tables, or jump to any table with ⌘K. Namespace pages summarize every table and point
   out the ones worth a look (many small files, delete files, long snapshot histories).
-- **Inspect a table:** schema, partitioning and properties; snapshot history with a trend chart of
-  records, files and size; files by size for any snapshot; a per-partition breakdown; the first rows.
+- **Inspect a table:** schema, partitioning and properties; snapshot history drawn as a branch
+  graph, with a trend chart of records, files and size per branch; files by size for any snapshot;
+  a per-partition breakdown; the first rows. For RisingWave copy-on-write sinks the graph links
+  each publish on `main` to the `ingestion` snapshot it came from and shows how far `main` trails.
 - **Query** with SQL (Apache DataFusion), read-only. Metadata tables such as
   `catalog.ns."table$files"` and `"table$partitions"` work too, and `"table@<snapshot or branch>"`
   reads a table as it was. Results export to CSV.

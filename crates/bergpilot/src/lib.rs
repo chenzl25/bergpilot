@@ -10,6 +10,7 @@ pub mod error;
 pub mod files;
 pub mod io_counter;
 pub mod jobs;
+pub mod lineage;
 pub mod maintenance;
 pub mod metadata;
 pub mod metadata_tables;

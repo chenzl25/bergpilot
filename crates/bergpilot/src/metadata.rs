@@ -3,6 +3,7 @@
 use iceberg::spec::{NestedFieldRef, Schema, TableMetadata, Type};
 use iceberg::table::Table;
 
+use crate::lineage::{RISINGWAVE_EPOCH, SnapshotLink, published_from};
 use crate::types::{
     CurrentTotals, PartitionFieldInfo, RefInfo, RefKind, SchemaField, SnapshotInfo, SortFieldInfo,
     TableDetail,
@@ -19,6 +20,21 @@ pub fn table_detail(catalog: &str, table: &Table, totals: CurrentTotals) -> Tabl
             .unwrap_or_else(|| format!("field {source_id}"))
     };
 
+    let links: Vec<SnapshotLink<'_>> = metadata
+        .snapshots()
+        .map(|snapshot| SnapshotLink {
+            id: snapshot.snapshot_id(),
+            parent: snapshot.parent_snapshot_id(),
+            sequence_number: snapshot.sequence_number(),
+            epoch: snapshot
+                .summary()
+                .additional_properties
+                .get(RISINGWAVE_EPOCH)
+                .map(String::as_str),
+        })
+        .collect();
+    let published = published_from(&links);
+
     let mut snapshots: Vec<SnapshotInfo> = metadata
         .snapshots()
         .map(|snapshot| SnapshotInfo {
@@ -33,6 +49,9 @@ pub fn table_detail(catalog: &str, table: &Table, totals: CurrentTotals) -> Tabl
                 .iter()
                 .map(|(key, value)| (key.clone(), value.clone()))
                 .collect(),
+            published_from: published
+                .get(&snapshot.snapshot_id())
+                .map(|id| id.to_string()),
         })
         .collect();
     snapshots.sort_by_key(|snapshot| (snapshot.timestamp_ms, snapshot.sequence_number));
@@ -148,10 +167,15 @@ fn refs(metadata: &TableMetadata) -> Vec<RefInfo> {
                 "tag" => RefKind::Tag,
                 _ => RefKind::Branch,
             };
+            let number = |key: &str| reference.get(key).and_then(|value| value.as_i64());
             Some(RefInfo {
                 name: name.clone(),
                 kind,
                 snapshot_id: snapshot_id.to_string(),
+                max_ref_age_ms: number("max-ref-age-ms"),
+                max_snapshot_age_ms: number("max-snapshot-age-ms"),
+                min_snapshots_to_keep: number("min-snapshots-to-keep")
+                    .and_then(|value| i32::try_from(value).ok()),
             })
         })
         .collect();

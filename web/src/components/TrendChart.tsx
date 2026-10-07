@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import type { SnapshotInfo } from "@/api/generated/SnapshotInfo";
 import { Panel } from "@/components/page";
@@ -53,7 +53,7 @@ function useWidth<T extends HTMLElement>() {
  * usually bursty, so a time axis would bunch them up); snapshots without the
  * total are skipped.
  */
-export function TrendChart({ snapshots }: { snapshots: SnapshotInfo[] }) {
+export function TrendChart({ snapshots, extra }: { snapshots: SnapshotInfo[]; extra?: ReactNode }) {
   const [metric, setMetric] = useState<Metric>("records");
   const [hover, setHover] = useState<number | null>(null);
   const [ref, width] = useWidth<HTMLDivElement>();
@@ -76,6 +76,8 @@ export function TrendChart({ snapshots }: { snapshots: SnapshotInfo[] }) {
   return (
     <Panel>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2">
+        {extra}
         <ToggleGroup
           type="single"
           variant="outline"
@@ -89,6 +91,7 @@ export function TrendChart({ snapshots }: { snapshots: SnapshotInfo[] }) {
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
+        </div>
         <div className="flex items-center gap-2 text-sm">
           <span className="font-semibold tabular-nums">{config.format(point.v)}</span>
           <span className="text-muted-foreground">{formatTime(point.t)}</span>

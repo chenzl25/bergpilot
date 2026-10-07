@@ -25,6 +25,7 @@ browser ── /api/* ──▶ api/ ──▶ catalogs (client per catalog) ─
 | `secrets.rs` | AES-256-GCM for catalog secrets; which property keys count as secrets. |
 | `catalogs.rs` | Building an iceberg-rust `Catalog` per kind, and caching clients until a catalog changes. |
 | `metadata.rs` | `TableDetail` from table metadata (schema, specs, snapshots, refs). |
+| `lineage.rs` | Links parent ids do not record: a RisingWave copy-on-write publish on `main` to the `ingestion` snapshot it was planned from (matched by `risingwave.commit.epoch`). |
 | `files.rs` | Files-by-size statistics per snapshot, cached by (table UUID, snapshot id). |
 | `metadata_tables.rs` | `"table$snapshots"`, `$history`, `$refs`, `$manifests`, `$files`, `$partitions`, plus partition statistics for the UI. |
 | `query.rs` | Read-only SQL: parse, resolve referenced tables, register only those (pinned to their current snapshot), execute with row, time and memory limits. |
@@ -43,7 +44,9 @@ Dependencies point down the table: handlers call modules; modules never call han
   `catalogFields.ts` describes the catalog form for each kind.
 - `components/`: the app shell (`Layout.tsx`: sidebar, breadcrumbs, token prompt), explorer tree,
   ⌘K menu, maintenance tab, job tables, trend chart, the virtualized result grid (`DataGrid.tsx`),
-  and shared page parts (`page.tsx`).
+  the snapshots tab with its branch graph (`SnapshotGraph.tsx`), and shared page parts (`page.tsx`).
+- `lib/snapshot-graph.ts`: the branch graph layout (lanes, line segments per row, publish lag),
+  kept free of React and runtime imports so `pnpm test` can run it under `node --test`.
 - `components/ui/`: [shadcn/ui](https://ui.shadcn.com) components (Radix primitives, "nova"
   style). They are our code: edit them freely. Add more with `pnpm dlx shadcn@latest add <name>`
   (`components.json` holds the settings).
@@ -71,7 +74,8 @@ recent queries and the SQL draft are kept in `localStorage`. Changes that finish
 
 ## Tests
 
-- Unit tests sit next to their code.
+- Unit tests sit next to their code. Web logic tests are `*.test.ts` files run by `pnpm test`
+  (Node's test runner, which strips the types itself).
 - `tests/sql_catalog.rs` and `tests/maintenance.rs` run the HTTP API in-process against a SQLite
   catalog and a local warehouse: browsing, SQL, metadata tables, and every maintenance operation,
   checking data and files on disk.

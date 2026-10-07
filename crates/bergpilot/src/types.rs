@@ -168,6 +168,12 @@ pub struct SnapshotInfo {
     pub timestamp_ms: i64,
     pub operation: String,
     pub summary: BTreeMap<String, String>,
+    /// The snapshot on another branch this one was published from (a
+    /// RisingWave copy-on-write sink publishing `ingestion` to `main`), see
+    /// [`crate::lineage::published_from`].
+    #[ts(optional)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub published_from: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, TS)]
@@ -184,6 +190,18 @@ pub struct RefInfo {
     pub name: String,
     pub kind: RefKind,
     pub snapshot_id: String,
+    /// Retention set on the ref; unset means the table defaults apply.
+    #[ts(optional, type = "number")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_ref_age_ms: Option<i64>,
+    /// Branches only.
+    #[ts(optional, type = "number")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_snapshot_age_ms: Option<i64>,
+    /// Branches only.
+    #[ts(optional)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_snapshots_to_keep: Option<i32>,
 }
 
 #[derive(Clone, Debug, Serialize, TS)]

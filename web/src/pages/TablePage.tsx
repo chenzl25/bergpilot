@@ -1,7 +1,6 @@
-import { Fragment, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  ChevronRight,
   Clock,
   Database,
   FileStack,
@@ -23,6 +22,7 @@ import type { FileStats } from "@/api/generated/FileStats";
 import type { TableDetail } from "@/api/generated/TableDetail";
 import { Results } from "@/components/DataGrid";
 import { MaintenanceTab } from "@/components/MaintenanceTab";
+import { SnapshotsTab } from "@/components/SnapshotGraph";
 import {
   CopyButton,
   Dot,
@@ -38,7 +38,6 @@ import {
   StatGrid,
 } from "@/components/page";
 import { PropertiesEditor } from "@/components/PropertiesEditor";
-import { OperationBadge, TrendChart } from "@/components/TrendChart";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,7 +47,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { formatAge, formatBytes, formatNumber, formatTime, sqlTableName } from "@/format";
 import { attention } from "@/health";
-import { cn } from "@/lib/utils";
 
 const TABS = ["overview", "data", "schema", "snapshots", "files", "maintenance"] as const;
 type Tab = (typeof TABS)[number];
@@ -350,122 +348,6 @@ function SchemaTab({ detail }: { detail: TableDetail }) {
         </Table>
       </Panel>
     </Section>
-  );
-}
-
-function SnapshotsTab({ detail }: { detail: TableDetail }) {
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const refsBySnapshot = new Map<string, string[]>();
-  for (const ref of detail.refs) {
-    refsBySnapshot.set(ref.snapshot_id, [...(refsBySnapshot.get(ref.snapshot_id) ?? []), ref.name]);
-  }
-  const newestFirst = [...detail.snapshots].reverse();
-  if (newestFirst.length === 0) return <p className="text-sm text-muted-foreground">This table has no snapshots yet.</p>;
-  return (
-    <div className="flex flex-col gap-6">
-      <TrendChart snapshots={detail.snapshots} />
-      <Section title="History" description="Newest first. Click a snapshot for its full summary.">
-        <Panel>
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/50 hover:bg-muted/50">
-                <TableHead className="w-8" />
-                <TableHead>Committed</TableHead>
-                <TableHead>Snapshot</TableHead>
-                <TableHead>Operation</TableHead>
-                <TableHead className="text-right">Files added</TableHead>
-                <TableHead className="text-right">Files removed</TableHead>
-                <TableHead className="text-right">Records added</TableHead>
-                <TableHead className="text-right">Records removed</TableHead>
-                <TableHead className="text-right">Total records</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {newestFirst.map((snapshot) => {
-                const s = snapshot.summary;
-                const added = Number(s["added-data-files"] ?? 0) + Number(s["added-delete-files"] ?? 0);
-                const removed = Number(s["deleted-data-files"] ?? 0) + Number(s["removed-delete-files"] ?? 0);
-                const open = expanded === snapshot.snapshot_id;
-                const asOf = `SELECT * FROM ${sqlTableName(detail.catalog, detail.namespace, `${detail.name}@${snapshot.snapshot_id}`)} LIMIT 100`;
-                return (
-                  <Fragment key={snapshot.snapshot_id}>
-                    <TableRow
-                      className="cursor-pointer"
-                      data-state={open ? "selected" : undefined}
-                      onClick={() => setExpanded(open ? null : snapshot.snapshot_id)}
-                    >
-                      <TableCell className="pr-0 text-muted-foreground">
-                        <ChevronRight className={cn("size-4 transition-transform", open && "rotate-90")} />
-                      </TableCell>
-                      <TableCell title={formatTime(snapshot.timestamp_ms)}>{formatTime(snapshot.timestamp_ms)}</TableCell>
-                      <TableCell>
-                        <span className="flex items-center gap-1.5 font-mono text-[13px]">
-                          {snapshot.snapshot_id}
-                          {snapshot.snapshot_id === detail.current_snapshot_id && (
-                            <Badge className="h-4.5 px-1.5 text-[10px]">current</Badge>
-                          )}
-                          {(refsBySnapshot.get(snapshot.snapshot_id) ?? [])
-                            .filter((ref) => ref !== "main")
-                            .map((ref) => (
-                              <Badge key={ref} variant="outline" className="h-4.5 px-1.5 text-[10px]">
-                                <GitBranch />
-                                {ref}
-                              </Badge>
-                            ))}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <OperationBadge operation={snapshot.operation} />
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">{added ? formatNumber(added) : ""}</TableCell>
-                      <TableCell className="text-right tabular-nums">{removed ? formatNumber(removed) : ""}</TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {s["added-records"] ? formatNumber(s["added-records"]) : ""}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {s["deleted-records"] ? formatNumber(s["deleted-records"]) : ""}
-                      </TableCell>
-                      <TableCell className="text-right font-medium tabular-nums">{formatNumber(s["total-records"])}</TableCell>
-                    </TableRow>
-                    {open && (
-                      <TableRow className="bg-muted/30 hover:bg-muted/30">
-                        <TableCell />
-                        <TableCell colSpan={8} className="py-4 whitespace-normal">
-                          <div className="flex flex-col gap-3">
-                            <div>
-                              <Button size="sm" variant="outline" asChild>
-                                <Link to={`/sql?q=${encodeURIComponent(asOf)}`}>
-                                  <SquareTerminal />
-                                  Query the table as of this snapshot
-                                </Link>
-                              </Button>
-                            </div>
-                            <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1 text-xs sm:grid-cols-[max-content_1fr_max-content_1fr]">
-                              <dt className="text-muted-foreground">snapshot</dt>
-                              <dd className="font-mono">{snapshot.snapshot_id}</dd>
-                              <dt className="text-muted-foreground">parent</dt>
-                              <dd className="font-mono">{snapshot.parent_id ?? "—"}</dd>
-                              <dt className="text-muted-foreground">sequence-number</dt>
-                              <dd className="font-mono">{snapshot.sequence_number}</dd>
-                              {Object.entries(s).map(([key, value]) => (
-                                <Fragment key={key}>
-                                  <dt className="text-muted-foreground">{key}</dt>
-                                  <dd className="font-mono break-all">{value}</dd>
-                                </Fragment>
-                              ))}
-                            </dl>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </Fragment>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </Panel>
-      </Section>
-    </div>
   );
 }
 
