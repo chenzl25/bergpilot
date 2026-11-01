@@ -3276,7 +3276,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.10.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=edc64dc1975eb05a8b795f920980d9bee206eb61#edc64dc1975eb05a8b795f920980d9bee206eb61"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=6e974ce0b94b93a3bf0a1c5005628529794a96d4#6e974ce0b94b93a3bf0a1c5005628529794a96d4"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -3335,7 +3335,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.10.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=edc64dc1975eb05a8b795f920980d9bee206eb61#edc64dc1975eb05a8b795f920980d9bee206eb61"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=6e974ce0b94b93a3bf0a1c5005628529794a96d4#6e974ce0b94b93a3bf0a1c5005628529794a96d4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3350,7 +3350,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.10.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=edc64dc1975eb05a8b795f920980d9bee206eb61#edc64dc1975eb05a8b795f920980d9bee206eb61"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=6e974ce0b94b93a3bf0a1c5005628529794a96d4#6e974ce0b94b93a3bf0a1c5005628529794a96d4"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -3372,7 +3372,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-s3tables"
 version = "0.10.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=edc64dc1975eb05a8b795f920980d9bee206eb61#edc64dc1975eb05a8b795f920980d9bee206eb61"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=6e974ce0b94b93a3bf0a1c5005628529794a96d4#6e974ce0b94b93a3bf0a1c5005628529794a96d4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3385,7 +3385,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-sql"
 version = "0.10.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=edc64dc1975eb05a8b795f920980d9bee206eb61#edc64dc1975eb05a8b795f920980d9bee206eb61"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=6e974ce0b94b93a3bf0a1c5005628529794a96d4#6e974ce0b94b93a3bf0a1c5005628529794a96d4"
 dependencies = [
  "async-trait",
  "iceberg",
@@ -3396,7 +3396,7 @@ dependencies = [
 [[package]]
 name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=618f53cfefbf1d24e30a846d62dc222c6c76dd5d#618f53cfefbf1d24e30a846d62dc222c6c76dd5d"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=ce9ec52ce6100f44a965f1ea6f8787331078439c#ce9ec52ce6100f44a965f1ea6f8787331078439c"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -3406,7 +3406,6 @@ dependencies = [
  "derive_builder",
  "futures",
  "iceberg",
- "iceberg-catalog-glue",
  "iceberg-catalog-rest",
  "iceberg-datafusion",
  "itertools 0.13.0",
@@ -3417,6 +3416,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-util",
  "tracing",
  "url",
  "uuid",
@@ -3425,7 +3425,7 @@ dependencies = [
 [[package]]
 name = "iceberg-datafusion"
 version = "0.10.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=edc64dc1975eb05a8b795f920980d9bee206eb61#edc64dc1975eb05a8b795f920980d9bee206eb61"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=6e974ce0b94b93a3bf0a1c5005628529794a96d4#6e974ce0b94b93a3bf0a1c5005628529794a96d4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3441,7 +3441,7 @@ dependencies = [
 [[package]]
 name = "iceberg-storage-opendal"
 version = "0.10.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=edc64dc1975eb05a8b795f920980d9bee206eb61#edc64dc1975eb05a8b795f920980d9bee206eb61"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=6e974ce0b94b93a3bf0a1c5005628529794a96d4#6e974ce0b94b93a3bf0a1c5005628529794a96d4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6223,6 +6223,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "libc",
  "pin-project-lite",
  "tokio",
