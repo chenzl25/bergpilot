@@ -8,6 +8,10 @@ on:
 jobs:
   rust:
     runs-on: ubuntu-latest
+    env:
+      # Full debug info for DataFusion and the AWS SDK fills the runner's disk
+      # when the test binaries link. Line tables keep backtraces readable.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v4
       - name: Install the pinned toolchain
