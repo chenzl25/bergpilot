@@ -3,14 +3,15 @@
 use iceberg::spec::{NestedFieldRef, Schema, TableMetadata, Type};
 use iceberg::table::Table;
 
+use crate::files::CheckedTotals;
 use crate::lineage::{RISINGWAVE_EPOCH, SnapshotLink, published_from};
 use crate::types::{
-    CurrentTotals, PartitionFieldInfo, RefInfo, RefKind, SchemaField, SnapshotInfo, SortFieldInfo,
-    TableDetail,
+    PartitionFieldInfo, RefInfo, RefKind, SchemaField, SnapshotInfo, SortFieldInfo, TableDetail,
 };
 
-/// `totals` are the current snapshot's, from [`crate::files::current_totals`].
-pub fn table_detail(catalog: &str, table: &Table, totals: CurrentTotals) -> TableDetail {
+/// `checked` holds the current snapshot's totals, from
+/// [`crate::files::current_totals`].
+pub fn table_detail(catalog: &str, table: &Table, checked: CheckedTotals) -> TableDetail {
     let metadata = table.metadata();
     let schema = metadata.current_schema();
     let column = |source_id: i32| {
@@ -96,7 +97,8 @@ pub fn table_detail(catalog: &str, table: &Table, totals: CurrentTotals) -> Tabl
             .collect(),
         snapshots,
         refs: refs(metadata),
-        totals,
+        totals: checked.totals,
+        summary_drift: checked.summary_drift,
     }
 }
 

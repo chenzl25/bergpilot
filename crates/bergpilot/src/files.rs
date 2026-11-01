@@ -97,7 +97,8 @@ impl FileStatsCache {
     }
 }
 
-/// Totals of the current snapshot.
+/// Totals of the current snapshot, and the summary totals that disagree
+/// with them.
 ///
 /// Snapshot summaries carry the same totals, but they can be wrong:
 /// iceberg-rust leaves the delete files a rewrite drops out of the summary
@@ -105,23 +106,54 @@ impl FileStatsCache {
 /// wrong totals. The manifest list counts
 /// the files of each manifest, so one small read tells whether the summary
 /// still holds; when it does not, the totals come from the manifests.
-pub async fn current_totals(table: &Table, cache: &FileStatsCache) -> ApiResult<CurrentTotals> {
+pub async fn current_totals(table: &Table, cache: &FileStatsCache) -> ApiResult<CheckedTotals> {
     let Some(snapshot) = table.metadata().current_snapshot() else {
-        return Ok(CurrentTotals::default());
+        return Ok(CheckedTotals::default());
     };
     if let Some(counts) = manifest_list_counts(table, snapshot).await?
         && let Some(bytes) = summary_number(snapshot, "total-files-size")
         && summary_matches(snapshot, &counts)
     {
-        return Ok(CurrentTotals { bytes, ..counts });
+        return Ok(CheckedTotals {
+            totals: CurrentTotals { bytes, ..counts },
+            summary_drift: Vec::new(),
+        });
     }
     let stats = cache.stats(table, None).await?;
-    Ok(CurrentTotals {
+    let totals = CurrentTotals {
         records: stats.data.records,
         data_files: stats.data.files,
         delete_files: stats.position_deletes.files + stats.equality_deletes.files,
         bytes: stats.data.bytes + stats.position_deletes.bytes + stats.equality_deletes.bytes,
+    };
+    Ok(CheckedTotals {
+        summary_drift: summary_drift(snapshot, &totals),
+        totals,
     })
+}
+
+/// [`current_totals`]' result.
+#[derive(Debug, Default)]
+pub struct CheckedTotals {
+    pub totals: CurrentTotals,
+    /// Summary keys of the current snapshot whose value differs from
+    /// `totals`, e.g. `total-delete-files`.
+    pub summary_drift: Vec<String>,
+}
+
+/// The summary totals of `snapshot` that differ from `totals`, the counts of
+/// its live files. A total the summary does not carry is not drift.
+pub fn summary_drift(snapshot: &SnapshotRef, totals: &CurrentTotals) -> Vec<String> {
+    [
+        ("total-records", totals.records),
+        ("total-data-files", totals.data_files),
+        ("total-delete-files", totals.delete_files),
+        ("total-files-size", totals.bytes),
+    ]
+    .into_iter()
+    .filter(|(key, actual)| summary_number(snapshot, key).is_some_and(|value| value != *actual))
+    .map(|(key, _)| key.to_owned())
+    .collect()
 }
 
 /// File and record counts of `snapshot` from its manifest list, without

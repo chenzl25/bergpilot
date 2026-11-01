@@ -51,18 +51,31 @@ function useWidth<T extends HTMLElement>() {
  * A step chart of a table total across snapshots, read from snapshot
  * summaries. Snapshots are evenly spaced in commit order (commits are
  * usually bursty, so a time axis would bunch them up); snapshots without the
- * total are skipped.
+ * total are skipped. Totals listed in `drift` (the table's summary
+ * disagrees with its files) are not offered.
  */
-export function TrendChart({ snapshots, extra }: { snapshots: SnapshotInfo[]; extra?: ReactNode }) {
+export function TrendChart({
+  snapshots,
+  drift = [],
+  extra,
+}: {
+  snapshots: SnapshotInfo[];
+  drift?: string[];
+  extra?: ReactNode;
+}) {
   const [metric, setMetric] = useState<Metric>("records");
   const [hover, setHover] = useState<number | null>(null);
   const [ref, width] = useWidth<HTMLDivElement>();
-  const config = METRICS.find((m) => m.id === metric)!;
-  const points = snapshots
-    .map((snapshot) => ({ t: snapshot.timestamp_ms, v: Number(snapshot.summary[config.key]), op: snapshot.operation }))
-    .filter((point) => Number.isFinite(point.v));
+  const metrics = METRICS.filter((m) => !drift.includes(m.key));
+  const hidden = METRICS.filter((m) => drift.includes(m.key));
+  const config = metrics.find((m) => m.id === metric) ?? metrics[0];
+  const points = config
+    ? snapshots
+        .map((snapshot) => ({ t: snapshot.timestamp_ms, v: Number(snapshot.summary[config.key]), op: snapshot.operation }))
+        .filter((point) => Number.isFinite(point.v))
+    : [];
 
-  if (points.length < 2) return null;
+  if (!config || points.length < 2) return null;
   const vMax = Math.max(...points.map((p) => p.v), 1);
   const plotWidth = Math.max(width - PAD.left - PAD.right, 10);
   const x = (index: number) => PAD.left + (index / (points.length - 1)) * plotWidth;
@@ -82,10 +95,10 @@ export function TrendChart({ snapshots, extra }: { snapshots: SnapshotInfo[]; ex
           type="single"
           variant="outline"
           size="sm"
-          value={metric}
+          value={config.id}
           onValueChange={(value) => value && setMetric(value as Metric)}
         >
-          {METRICS.map((m) => (
+          {metrics.map((m) => (
             <ToggleGroupItem key={m.id} value={m.id}>
               {m.label}
             </ToggleGroupItem>
@@ -98,6 +111,13 @@ export function TrendChart({ snapshots, extra }: { snapshots: SnapshotInfo[]; ex
           <OperationBadge operation={point.op} />
         </div>
       </div>
+      {hidden.length > 0 && (
+        <p className="border-b px-4 py-2 text-xs text-muted-foreground">
+          {hidden.map((m) => m.label).join(" and ")} {hidden.length === 1 ? "is" : "are"} not charted: this table's
+          snapshot summaries disagree with its files. A compaction that drops delete files can leave them in the summary
+          totals (risingwavelabs/iceberg-rust#257), and later snapshots add to the wrong numbers.
+        </p>
+      )}
       <div ref={ref} className="px-2 py-2">
         {width > 0 && (
           <svg

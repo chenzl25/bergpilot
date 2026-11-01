@@ -142,7 +142,8 @@ async fn require_token(State(state): State<AppState>, request: Request, next: Ne
     let Some(expected) = state.token.as_deref() else {
         return next.run(request).await;
     };
-    if request.uri().path().ends_with("/info") {
+    // Paths here are relative to `/api`.
+    if request.uri().path() == "/info" {
         return next.run(request).await;
     }
     let provided = request

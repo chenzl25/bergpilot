@@ -69,6 +69,7 @@ export function SnapshotsTab({ detail }: { detail: TableDetail }) {
       )}
       <TrendChart
         snapshots={charted ? charted.history : detail.snapshots}
+        drift={detail.summary_drift}
         extra={
           graph.branches.length > 1 && charted ? (
             <Select value={charted.ref.name} onValueChange={setChartBranch}>
@@ -100,7 +101,13 @@ export function SnapshotsTab({ detail }: { detail: TableDetail }) {
           .join(" ")}
         actions={<Legend graph={graph} />}
       >
-        <History ref={listRef} graph={graph} selected={selected} onSelect={setSelected} />
+        <History
+          ref={listRef}
+          graph={graph}
+          totalRecords={!detail.summary_drift.includes("total-records")}
+          selected={selected}
+          onSelect={setSelected}
+        />
       </Section>
       <SnapshotSheet detail={detail} graph={graph} id={selected} onShow={show} onClose={() => setSelected(null)} />
     </div>
@@ -216,7 +223,7 @@ function BranchCard(props: { detail: TableDetail; graph: SnapshotGraph; branch: 
         <span>
           {formatNumber(branch.history.length)} snapshot{branch.history.length === 1 ? "" : "s"}
         </span>
-        {tip.summary["total-records"] !== undefined && (
+        {tip.summary["total-records"] !== undefined && !props.detail.summary_drift.includes("total-records") && (
           <>
             <span>·</span>
             <span>{formatNumber(tip.summary["total-records"])} records</span>
@@ -254,6 +261,8 @@ type HistoryHandle = { scrollTo: (id: string) => void };
 function History(props: {
   ref: Ref<HistoryHandle>;
   graph: SnapshotGraph;
+  /** Whether the summaries' total-records can be shown (see `summary_drift`). */
+  totalRecords: boolean;
   selected: string | null;
   onSelect: (id: string) => void;
 }) {
@@ -307,6 +316,7 @@ function History(props: {
                 key={item.key}
                 row={row}
                 graph={graph}
+                totalRecords={props.totalRecords}
                 grid={grid}
                 selected={props.selected === row.snapshot.snapshot_id}
                 top={item.start}
@@ -334,6 +344,7 @@ function change(added: number, removed: number) {
 function HistoryRow(props: {
   row: GraphRow;
   graph: SnapshotGraph;
+  totalRecords: boolean;
   grid: CSSProperties;
   selected: boolean;
   top: number;
@@ -385,7 +396,7 @@ function HistoryRow(props: {
       </span>
       <span className={cn(wide, "pr-3 text-right tabular-nums")}>{change(n("added-records"), n("deleted-records"))}</span>
       <span className={cn(wide, "pr-4 text-right font-medium tabular-nums")}>
-        {s["total-records"] !== undefined ? formatNumber(s["total-records"]) : ""}
+        {props.totalRecords && s["total-records"] !== undefined ? formatNumber(s["total-records"]) : ""}
       </span>
     </div>
   );

@@ -14,4 +14,12 @@ snapshots: Array<SnapshotInfo>, refs: Array<RefInfo>,
 /**
  * Totals of the current snapshot, checked against its manifests.
  */
-totals: CurrentTotals, };
+totals: CurrentTotals, 
+/**
+ * Summary totals of the current snapshot that disagree with its files,
+ * e.g. `total-delete-files`. A rewrite that drops delete files does not
+ * subtract them (risingwavelabs/iceberg-rust#257) and later commits add
+ * to the wrong value, so the same total in earlier snapshots can be
+ * wrong too. Empty when the summary holds.
+ */
+summary_drift: Array<string>, };

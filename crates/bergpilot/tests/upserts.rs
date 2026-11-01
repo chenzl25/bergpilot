@@ -232,6 +232,11 @@ async fn reads_and_compacts_equality_deletes() {
     assert_eq!(detail["totals"]["data_files"], 1, "{}", detail["totals"]);
     assert_eq!(detail["totals"]["delete_files"], 0, "{}", detail["totals"]);
     assert_eq!(detail["totals"]["records"], 5, "{}", detail["totals"]);
+    // The rewrite dropped every delete file, but iceberg-rust leaves them in
+    // the summary totals (risingwavelabs/iceberg-rust#257); the page says so.
+    let drift = detail["summary_drift"].as_array().unwrap();
+    assert!(drift.contains(&json!("total-delete-files")), "{drift:?}");
+    assert!(!drift.contains(&json!("total-data-files")), "{drift:?}");
 }
 
 /// The writer commits updates and deletes of rows the compaction is

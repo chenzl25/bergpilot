@@ -66,6 +66,11 @@ async fn browses_and_queries_a_sql_catalog() {
     assert_eq!(detail["catalog"], "local");
     assert_eq!(detail["snapshots"].as_array().unwrap().len(), 2);
     assert_eq!(detail["partition_fields"][0]["source"], "region");
+    assert_eq!(
+        detail["summary_drift"],
+        json!([]),
+        "appends keep the summary right"
+    );
 
     let (_, files) = call(
         &router,
@@ -335,4 +340,29 @@ async fn refuses_foreign_host_names_without_a_token() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn token_guards_every_route_but_info() {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).await.unwrap();
+    let guarded = app(AppState::new(store, Some("secret".into())));
+    let status = |path: &str| {
+        let guarded = guarded.clone();
+        let request = Request::builder()
+            .uri(path)
+            .header("host", "127.0.0.1:7878")
+            .body(Body::empty())
+            .unwrap();
+        async move { guarded.oneshot(request).await.unwrap().status() }
+    };
+    assert_eq!(status("/api/info").await, StatusCode::OK);
+    assert_eq!(status("/api/catalogs").await, StatusCode::UNAUTHORIZED);
+    // Only `/api/info` itself is open, not every path that ends like it.
+    assert_eq!(status("/api/catalogs/info").await, StatusCode::UNAUTHORIZED);
+    assert_eq!(status("/api/jobs/info").await, StatusCode::UNAUTHORIZED);
 }

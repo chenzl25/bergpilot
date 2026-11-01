@@ -231,6 +231,12 @@ pub struct TableDetail {
     pub refs: Vec<RefInfo>,
     /// Totals of the current snapshot, checked against its manifests.
     pub totals: CurrentTotals,
+    /// Summary totals of the current snapshot that disagree with its files,
+    /// e.g. `total-delete-files`. A rewrite that drops delete files does not
+    /// subtract them (risingwavelabs/iceberg-rust#257) and later commits add
+    /// to the wrong value, so the same total in earlier snapshots can be
+    /// wrong too. Empty when the summary holds.
+    pub summary_drift: Vec<String>,
 }
 
 /// Live files and records of a snapshot. Records count the rows in data

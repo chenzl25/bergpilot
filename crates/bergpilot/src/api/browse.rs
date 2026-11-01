@@ -85,8 +85,8 @@ pub async fn table(
     let connected = state.registry.get(id).await?;
     let ident = TableIdent::new(namespace_ident(&query.namespace)?, query.name);
     let table = connected.catalog.load_table(&ident).await?;
-    let totals = current_totals(&table, &state.file_stats).await?;
-    Ok(Json(table_detail(&connected.record.name, &table, totals)))
+    let checked = current_totals(&table, &state.file_stats).await?;
+    Ok(Json(table_detail(&connected.record.name, &table, checked)))
 }
 
 pub async fn files(
@@ -321,8 +321,12 @@ pub async fn update_properties(
     }
     let tx = action.apply(tx)?;
     let updated = tx.commit(connected.catalog.as_ref()).await?;
-    let totals = current_totals(&updated, &state.file_stats).await?;
-    Ok(Json(table_detail(&connected.record.name, &updated, totals)))
+    let checked = current_totals(&updated, &state.file_stats).await?;
+    Ok(Json(table_detail(
+        &connected.record.name,
+        &updated,
+        checked,
+    )))
 }
 
 pub async fn partitions(
