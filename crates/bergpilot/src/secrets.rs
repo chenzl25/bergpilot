@@ -13,7 +13,7 @@ use aes_gcm::{Aes256Gcm, Key, Nonce};
 use anyhow::{Context, bail};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use rand::RngCore;
+use rand::Rng;
 
 const KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
@@ -47,9 +47,9 @@ impl SecretBox {
     }
 
     fn from_key(key: &[u8]) -> Self {
-        let key = Key::<Aes256Gcm>::from_slice(key);
+        let key = Key::<Aes256Gcm>::try_from(key).expect("the key length was checked");
         Self {
-            cipher: Aes256Gcm::new(key),
+            cipher: Aes256Gcm::new(&key),
         }
     }
 
@@ -59,7 +59,7 @@ impl SecretBox {
         rand::rng().fill_bytes(&mut nonce);
         let ciphertext = self
             .cipher
-            .encrypt(Nonce::from_slice(&nonce), plaintext.as_slice())
+            .encrypt(&Nonce::from(nonce), plaintext.as_slice())
             .map_err(|_| anyhow::anyhow!("failed to encrypt catalog secrets"))?;
         let mut blob = nonce.to_vec();
         blob.extend_from_slice(&ciphertext);
@@ -74,12 +74,10 @@ impl SecretBox {
             bail!("stored secrets are truncated");
         }
         let (nonce, ciphertext) = blob.split_at(NONCE_LEN);
-        let plaintext = self
-            .cipher
-            .decrypt(Nonce::from_slice(nonce), ciphertext)
-            .map_err(|_| {
-                anyhow::anyhow!("failed to decrypt catalog secrets; was secret.key replaced?")
-            })?;
+        let nonce = Nonce::try_from(nonce).expect("split at the nonce length");
+        let plaintext = self.cipher.decrypt(&nonce, ciphertext).map_err(|_| {
+            anyhow::anyhow!("failed to decrypt catalog secrets; was secret.key replaced?")
+        })?;
         Ok(serde_json::from_slice(&plaintext)?)
     }
 }
@@ -140,6 +138,19 @@ mod tests {
 
         let reopened = SecretBox::load_or_create(&path).unwrap();
         assert_eq!(reopened.decrypt(&encoded).unwrap(), secrets);
+    }
+
+    /// Secrets stored by earlier builds must keep decrypting. The blob was
+    /// written with aes-gcm 0.10 under key bytes 0..32 and nonce bytes
+    /// 100..112.
+    #[test]
+    fn decrypts_secrets_stored_by_earlier_versions() {
+        let key: Vec<u8> = (0u8..32).collect();
+        let stored = "ZGVmZ2hpamtsbW5vMzm9FByNM/BKCz6E+F9IlCb4dW/oHpYGhaw3xXkSJpzqkMWyE2Q9H/Fy";
+        assert_eq!(
+            SecretBox::from_key(&key).decrypt(stored).unwrap(),
+            BTreeMap::from([("credential".to_owned(), "id:secret".to_owned())])
+        );
     }
 
     #[test]

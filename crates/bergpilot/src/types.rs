@@ -58,6 +58,9 @@ pub struct CatalogSummary {
     pub id: i64,
     pub name: String,
     pub kind: CatalogKind,
+    // ts-rs 12 types maps as `{ [key in string]: string }`; keep the
+    // optional form so lookups of absent keys are `string | undefined`.
+    #[ts(type = "{ [key in string]?: string }")]
     pub properties: BTreeMap<String, String>,
     pub secret_keys: Vec<String>,
     pub created_at: String,
@@ -74,8 +77,10 @@ pub struct CatalogInput {
     pub name: String,
     pub kind: CatalogKind,
     #[serde(default)]
+    #[ts(type = "{ [key in string]?: string }")]
     pub properties: BTreeMap<String, String>,
     #[serde(default)]
+    #[ts(type = "{ [key in string]?: string }")]
     pub secrets: BTreeMap<String, String>,
     #[serde(default)]
     #[ts(optional)]
@@ -167,6 +172,7 @@ pub struct SnapshotInfo {
     #[ts(type = "number")]
     pub timestamp_ms: i64,
     pub operation: String,
+    #[ts(type = "{ [key in string]?: string }")]
     pub summary: BTreeMap<String, String>,
     /// The snapshot on another branch this one was published from (a
     /// RisingWave copy-on-write sink publishing `ingestion` to `main`), see
@@ -225,6 +231,7 @@ pub struct TableDetail {
     pub schema: Vec<SchemaField>,
     pub partition_fields: Vec<PartitionFieldInfo>,
     pub sort_fields: Vec<SortFieldInfo>,
+    #[ts(type = "{ [key in string]?: string }")]
     pub properties: BTreeMap<String, String>,
     /// Oldest first.
     pub snapshots: Vec<SnapshotInfo>,
@@ -693,6 +700,7 @@ pub struct TableSummary {
 #[ts(export)]
 pub struct NamespaceDetail {
     pub namespace: Vec<String>,
+    #[ts(type = "{ [key in string]?: string }")]
     pub properties: BTreeMap<String, String>,
     pub child_namespaces: Vec<Vec<String>>,
     pub tables: Vec<TableSummary>,
@@ -723,6 +731,7 @@ pub struct PropertiesUpdate {
     #[serde(flatten)]
     pub target: TableRef,
     #[serde(default)]
+    #[ts(type = "{ [key in string]?: string }")]
     pub set: BTreeMap<String, String>,
     #[serde(default)]
     pub remove: Vec<String>,
